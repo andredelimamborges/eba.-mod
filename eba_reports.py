@@ -293,8 +293,43 @@ class PDFReport(FPDF):
         self.ln(1)
 
     def paragraph(self, body: str, size: int = 10) -> None:
+        """Escreve um parágrafo com proteção contra palavras gigantes/estranhas."""
+        txt = self._safe(body or "")
         self.set_font(self._family, "", size)
-        self.multi_cell(0, 5, self._safe(body or ""))
+
+        # 1) quebra artificialmente "palavras" muito longas (sem espaços)
+        #    Ex.: um texto com 200 caracteres seguidos pode derrubar o FPDF.
+        import re as _re
+
+        def _break_long_tokens(s: str, max_len: int = 60) -> str:
+            def _split_token(m):
+                token = m.group(0)
+                chunks = [
+                    token[i : i + max_len] for i in range(0, len(token), max_len)
+                ]
+                # insere espaço entre pedaços para o multi_cell conseguir quebrar
+                return " ".join(chunks)
+
+            # \S{max_len,} = sequência de caracteres sem espaço com tamanho >= max_len
+            return _re.sub(rf"\S{{{max_len},}}", _split_token, s)
+
+        txt = _break_long_tokens(txt, max_len=60)
+
+        try:
+            self.multi_cell(0, 5, txt)
+        except Exception:
+            # fallback extremo: se ainda assim der erro, corta o texto
+            try:
+                self.multi_cell(
+                    0,
+                    5,
+                    self._safe(
+                        "[Trecho original muito longo ou inválido. Texto truncado para preservar o PDF.]"
+                    ),
+                )
+            except Exception:
+                # em último caso, ignora o parágrafo
+                pass
         self.ln(1)
 
 
