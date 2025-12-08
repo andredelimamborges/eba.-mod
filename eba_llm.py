@@ -104,7 +104,7 @@ def _estimate_tokens(text: str) -> int:
 
 @st.cache_resource(show_spinner=False)
 def get_llm_client_cached(provider: str, api_key: str):
-    """Cria cliente LLM (Groq/OpenAI), sem mexer em proxies customizados."""
+    """Cria cliente LLM (Groq/OpenAI) usando o client padrão do SDK."""
     if not api_key:
         raise RuntimeError("Chave da API não configurada. Defina nos Secrets do Streamlit.")
     pv = (provider or "Groq").lower()
@@ -132,7 +132,6 @@ def get_llm_client_cached(provider: str, api_key: str):
             raise RuntimeError(f"[Erro cliente] OpenAI SDK falhou ({e})")
 
     raise RuntimeError(f"Provedor não suportado: {provider}")
-
 
 def get_api_key_for_provider(provider: str) -> str:
     provider = (provider or "Groq").lower()
