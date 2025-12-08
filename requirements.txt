@@ -1,0 +1,8 @@
+.
+├─ app.py            # aquele que eu te mandei
+├─ eba_config.py
+├─ eba_llm.py
+├─ eba_reports.py
+├─ requirements.txt
+├─ training_data/    # (pasta vazia pode, o app cria; opcional)
+└─ relatorios_processados/  # idem
