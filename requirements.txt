@@ -1,8 +1,12 @@
-.
-├─ app.py            # aquele que eu te mandei
-├─ eba_config.py
-├─ eba_llm.py
-├─ eba_reports.py
-├─ requirements.txt
-├─ training_data/    # (pasta vazia pode, o app cria; opcional)
-└─ relatorios_processados/  # idem
+streamlit==1.40.1
+groq==0.8.0
+openai==1.57.4
+httpx==0.28.1
+pdfminer.six==20231228
+fpdf2==2.8.1
+plotly==5.24.1
+kaleido==0.2.1
+pandas==2.2.3
+numpy==2.1.3
+tiktoken==0.8.0
+requests==2.32.3
