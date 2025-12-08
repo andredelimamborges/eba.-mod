@@ -15,19 +15,16 @@ import streamlit as st
 from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
 
 # ======== PALETA DE CORES MAIS CORPORATIVA ========
-# Azul marinho como cor principal
-COLOR_PRIMARY = "#1F4E79"
-COLOR_SECONDARY = "#4F6D7A"
-COLOR_CANDIDATO = "#1F4E79"  # candidato sempre azul corporativo
+COLOR_PRIMARY = "#1F4E79"      # azul marinho principal
+COLOR_SECONDARY = "#4F6D7A"    # azul acinzentado
+COLOR_CANDIDATO = "#1F4E79"    # candidato sempre em azul corporativo
 
-# Faixa ideal em tons discretos de azul esverdeado
 COLOR_IDEAL_MAX = "rgba(154, 190, 214, 0.5)"
 COLOR_IDEAL_MIN = "rgba(198, 224, 241, 0.35)"
 
-# Cores de status (mais sóbrias)
-COLOR_WARN = "#F0B429"   # âmbar
-COLOR_GOOD = "#2E7D32"   # verde escuro
-COLOR_BAD = "#C62828"    # vermelho escuro
+COLOR_WARN = "#F0B429"         # âmbar
+COLOR_GOOD = "#2E7D32"         # verde escuro
+COLOR_BAD = "#C62828"          # vermelho escuro
 
 
 # ======== GRÁFICOS ========
@@ -113,7 +110,6 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         return None
     df = df.sort_values("nota", ascending=True).tail(15)
 
-    # cores mais discretas, mas distinguindo abaixo/na média/acima
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 60 else COLOR_PRIMARY
         for n in df["nota"]
@@ -226,7 +222,7 @@ class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.set_auto_page_break(auto=True, margin=15)
-        self.set_margins(20, 20, 20)  # um pouco mais centralizado
+        self.set_margins(20, 20, 20)
         self._family = "Helvetica"
         self._unicode = False
 
@@ -306,7 +302,7 @@ class PDFReport(FPDF):
             except Exception:
                 pass
 
-        self.set_fill_color(31, 78, 121)  # azul marinho
+        self.set_fill_color(31, 78, 121)
         self.rect(0, 0, self.w, 22, "F")
 
         self.set_y(32)
@@ -350,7 +346,7 @@ class PDFReport(FPDF):
 
     def heading(self, title: str) -> None:
         self.set_font(self._family, "B", 11)
-        self.set_fill_color(31, 78, 121)  # mesmo azul da capa
+        self.set_fill_color(31, 78, 121)
         self.set_text_color(255, 255, 255)
         self.safe_cell(0, 8, title.upper(), align="L", ln=1, fill=True)
         self.set_text_color(0, 0, 0)
@@ -372,12 +368,12 @@ class PDFReport(FPDF):
         self.ln(0.5)
 
 
-# ======== RESUMOS DE GRÁFICOS ========
+# ======== RESUMOS DE GRÁFICOS (MAIS FORTES) ========
 def _resumo_radar(traits: Dict[str, Any], traits_ideais: Dict[str, Tuple[float, float]]) -> str:
     if not traits or not traits_ideais:
         return (
-            "O gráfico de radar compara os traços do candidato com a faixa ideal para o cargo, "
-            "indicando aproximações e lacunas nos principais fatores de personalidade."
+            "O gráfico de radar compara os traços do candidato com a faixa ideal esperada para o cargo, "
+            "permitindo visualizar rapidamente onde há maior aderência e quais fatores se afastam do perfil-alvo."
         )
 
     desvios = []
@@ -392,33 +388,36 @@ def _resumo_radar(traits: Dict[str, Any], traits_ideais: Dict[str, Tuple[float, 
 
     if not desvios:
         return (
-            "O gráfico de radar apresenta o posicionamento geral do candidato frente ao perfil-alvo do cargo."
+            "O gráfico de radar apresenta o posicionamento geral do candidato frente ao perfil-alvo do cargo, "
+            "reforçando o entendimento sobre como sua personalidade se distribui nos cinco grandes fatores."
         )
 
     media_desvio = sum(desvios) / len(desvios)
     if media_desvio <= 1.0:
-        nivel = "bastante alinhado ao perfil ideal"
+        nivel = "fortemente alinhado ao perfil ideal, com variações mínimas"
     elif media_desvio <= 2.0:
-        nivel = "razoavelmente alinhado, com alguns pontos de atenção"
+        nivel = "razoavelmente alinhado, com alguns fatores que requerem monitoramento"
     else:
-        nivel = "com diferenças relevantes em relação ao perfil ideal"
+        nivel = "com diferenças mais marcantes em relação ao perfil ideal, indicando pontos de atenção"
 
     return (
-        f"O gráfico de radar mostra que o conjunto de traços do candidato está {nivel}, "
-        "especialmente nos fatores de maior peso para a função."
+        "O gráfico de radar ilustra o grau de aderência do candidato ao perfil comportamental esperado. "
+        f"De forma geral, o conjunto de traços mostra-se {nivel}. "
+        "Esse equilíbrio (ou desvio) deve ser considerado em conjunto com os requisitos críticos da função."
     )
 
 
 def _resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
     if not competencias:
         return "Não há competências suficientes para a construção do gráfico correspondente."
+
     df = pd.DataFrame(competencias)
     if "nota" not in df.columns or "nome" not in df.columns:
         return "As competências não estão estruturadas de forma completa para análise gráfica."
 
     df = df.sort_values("nota", ascending=False)
-    top = df.head(2)
-    low = df.tail(2)
+    top = df.head(3)
+    low = df.tail(3)
 
     destaques = ", ".join(
         f"{row['nome']} ({int(row['nota'])})" for _, row in top.iterrows()
@@ -427,25 +426,41 @@ def _resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
         f"{row['nome']} ({int(row['nota'])})" for _, row in low.iterrows()
     )
 
+    media = df["nota"].mean()
+    acima = (df["nota"] >= 60).sum()
+    abaixo = (df["nota"] < 45).sum()
+
     return (
-        "O gráfico de barras resume as principais competências avaliadas. "
-        f"Entre os destaques positivos estão: {destaques}. "
-        f"Como pontos que merecem maior atenção, observam-se: {frag}."
+        "O gráfico de competências sintetiza a força do candidato frente às principais exigências da função. "
+        f"Destacam-se positivamente: {destaques}. "
+        f"Entre os pontos que merecem maior desenvolvimento, observam-se: {frag}. "
+        f"No conjunto, as notas apresentam média em torno de {media:.0f}, com {acima} competências em nível satisfatório "
+        f"e {abaixo} abaixo do patamar esperado."
     )
 
 
 def _resumo_fit(fit_score: float) -> str:
     fit = float(fit_score or 0)
     if fit < 40:
-        nivel = "baixo alinhamento global ao cargo, sugerindo cautela na indicação"
+        nivel = (
+            "um baixo alinhamento global ao cargo, sugerindo prudência na recomendação e eventual busca por posições "
+            "alternativas mais aderentes ao perfil atual"
+        )
     elif fit < 70:
-        nivel = "alinhamento moderado ao cargo, indicando necessidade de análise complementar"
+        nivel = (
+            "um alinhamento moderado, indicando que o candidato pode performar bem, desde que haja suporte, "
+            "acompanhamento e ações estruturadas de desenvolvimento"
+        )
     else:
-        nivel = "alto alinhamento global ao cargo, reforçando a indicação do candidato"
+        nivel = (
+            "um alto alinhamento ao cargo, reforçando a indicação e sugerindo boa probabilidade de integração e desempenho "
+            "positivos no contexto da função"
+        )
 
     return (
         f"O indicador de fit aponta um nível de compatibilidade de aproximadamente {fit:.0f}%. "
-        f"Em termos práticos, isso representa {nivel}."
+        f"Na prática, isso representa {nivel}. "
+        "Este indicador deve ser considerado em conjunto com a análise qualitativa e demais etapas do processo seletivo."
     )
 
 
@@ -468,10 +483,10 @@ def gerar_pdf_corporativo(
         else:
             pdf.set_main_family("Helvetica", False)
 
-        # CAPA
+        # 1. CAPA
         pdf.cover(APP_NAME, APP_TAGLINE, "André de Lima", APP_VERSION, logo_path)
 
-        # 1. INFORMAÇÕES DO CANDIDATO
+        # 2. INFORMAÇÕES DO CANDIDATO
         pdf.heading("1. Informações do Candidato")
         candidato = bfa_data.get("candidato", {}) or {}
         info_text = (
@@ -481,7 +496,7 @@ def gerar_pdf_corporativo(
         )
         pdf.paragraph(info_text, size=10)
 
-        # 2. DECISÃO E COMPATIBILIDADE (box)
+        # 3. DECISÃO E COMPATIBILIDADE
         pdf.heading("2. Decisão e Compatibilidade")
         decisao = (analysis or {}).get("decisao", "N/A")
         compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
@@ -490,7 +505,7 @@ def gerar_pdf_corporativo(
         pdf.set_draw_color(210, 210, 210)
         pdf.set_line_width(0.3)
         x0, y0 = pdf.get_x(), pdf.get_y()
-        box_width = pdf.w - 40  # respeitando margens
+        box_width = pdf.w - 40
         pdf.rect(x0, y0, box_width, 14)
         pdf.set_xy(x0 + 3, y0 + 2)
         pdf.set_font(pdf._family, "B", 11)
@@ -513,33 +528,33 @@ def gerar_pdf_corporativo(
         if justificativa:
             pdf.paragraph(justificativa, size=10)
 
-        # 3. RESUMO EXECUTIVO
+        # 4. RESUMO EXECUTIVO
         pdf.heading("3. Resumo Executivo")
         resumo = (analysis or {}).get("resumo_executivo", justificativa)
         if resumo:
             pdf.paragraph(resumo, size=10)
 
-        # 4. BIG FIVE
+        # 5. BIG FIVE
         pdf.heading("4. Traços de Personalidade (Big Five)")
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
         for trait_name, valor in traits.items():
             if valor is None:
                 continue
             pdf.set_font(pdf._family, "B", 9)
-            pdf.safe_cell(70, 5, f"{trait_name}:")
+            pdf.safe_cell(70, 4.5, f"{trait_name}:")
             pdf.set_font(pdf._family, "", 9)
             try:
                 txt_val = f"{float(valor):.1f}/10"
             except Exception:
                 txt_val = f"{valor}/10"
-            pdf.safe_cell(0, 5, txt_val, ln=1)
+            pdf.safe_cell(0, 4.5, txt_val, ln=1)
 
         analise_tracos = (analysis or {}).get("analise_tracos", {}) or {}
         for trait, analise_txt in analise_tracos.items():
             if analise_txt:
                 pdf.paragraph(f"{trait}: {analise_txt}", size=9)
 
-        # 5. VISUALIZAÇÕES (GRÁFICOS) — mesma página (deixa o FPDF quebrar sozinho)
+        # 6. VISUALIZAÇÕES (GRÁFICOS)
         pdf.heading("5. Visualizações (Gráficos)")
 
         from eba_config import gerar_perfil_cargo_dinamico
@@ -600,7 +615,7 @@ def gerar_pdf_corporativo(
         else:
             pdf.paragraph("⚠️ Não foi possível renderizar o indicador de fit.", size=8)
 
-        # 6. SAÚDE EMOCIONAL
+        # 7. SAÚDE EMOCIONAL
         pdf.heading("6. Saúde Emocional e Resiliência")
         saude = (analysis or {}).get("saude_emocional_contexto", "")
         if saude:
@@ -613,21 +628,33 @@ def gerar_pdf_corporativo(
             pdf.safe_cell(70, 4.5, f"{k.replace('_', ' ').capitalize()}: ")
             pdf.safe_cell(0, 4.5, f"{float(v):.0f}/100", ln=1)
 
-        # 7. PONTOS FORTES / ATENÇÃO
+        # 8. PONTOS FORTES (sempre aparece)
+        pdf.heading("7. Pontos Fortes")
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
         if pf:
-            pdf.heading("7. Pontos Fortes")
             for item in pf:
                 if item:
                     pdf.paragraph(f"+ {item}", size=10)
+        else:
+            pdf.paragraph(
+                "Não foram identificados pontos fortes específicos suficientemente marcantes no relatório para destaque individual.",
+                size=9,
+            )
+
+        # 9. PONTOS DE ATENÇÃO (sempre aparece)
+        pdf.heading("8. Pontos de Atenção")
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
         if pa:
-            pdf.heading("8. Pontos de Atenção")
             for item in pa:
                 if item:
                     pdf.paragraph(f"! {item}", size=10)
+        else:
+            pdf.paragraph(
+                "O relatório não evidencia pontos de atenção críticos, mas recomenda-se acompanhamento regular no período de adaptação.",
+                size=9,
+            )
 
-        # 9/10. RECOMENDAÇÕES / CARGOS ALTERNATIVOS
+        # 10. RECOMENDAÇÕES DE DESENVOLVIMENTO (inclui cursos/trilhas)
         pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         for i, rec in enumerate(recs, 1):
@@ -637,9 +664,26 @@ def gerar_pdf_corporativo(
                 pdf.set_font(pdf._family, "", 10)
                 pdf.safe_multi_cell(0, 5, rec)
 
+        # bloco genérico de cursos/trilhas – sempre aparece de forma suave
+        pdf.ln(1)
+        pdf.set_font(pdf._family, "B", 10)
+        pdf.safe_cell(0, 6, "Sugestões complementares de desenvolvimento:", ln=1)
+        pdf.set_font(pdf._family, "", 9)
+        pdf.safe_multi_cell(
+            0,
+            4.5,
+            (
+                "- Participação em cursos de atualização técnica relacionados à área de atuação e às ferramentas-chave do cargo.\n"
+                "- Trilhas de desenvolvimento em competências comportamentais (comunicação, trabalho em equipe, gestão de conflitos).\n"
+                "- Programas de mentoring ou coaching interno, com foco em aceleração de desempenho e adaptação cultural.\n"
+                "- Workshops pontuais de liderança, negociação e visão de negócio, conforme o nível de senioridade esperado."
+            ),
+        )
+
+        # 11. CARGOS ALTERNATIVOS
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
+        pdf.heading("10. Cargos Alternativos Sugeridos")
         if cargos_alt:
-            pdf.heading("10. Cargos Alternativos Sugeridos")
             for cargo_info in cargos_alt:
                 nome_alt = cargo_info.get("cargo", "")
                 just = cargo_info.get("justificativa", "")
@@ -650,17 +694,23 @@ def gerar_pdf_corporativo(
                 if just:
                     pdf.set_font(pdf._family, "", 9)
                     pdf.safe_multi_cell(0, 4.5, f"   {just}")
+        else:
+            pdf.paragraph(
+                "Não foram sugeridos cargos alternativos específicos neste relatório. "
+                "Caso necessário, recomenda-se avaliar posições com escopo e senioridade próximos ao cargo atualmente analisado.",
+                size=9,
+            )
 
-        # rodapé institucional
-        pdf.ln(1.5)
-        pdf.set_font(pdf._family, "I", 8)
-        pdf.safe_multi_cell(
-            0,
-            4,
+        # 12. RODAPÉ / CONSIDERAÇÕES FINAIS
+        pdf.heading("11. Considerações Finais")
+        pdf.paragraph(
             (
-                "Este relatório auxilia a decisão e não substitui avaliação profissional. "
-                "Uso interno — Elder Brain Analytics PRO."
+                "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas, "
+                "histórico profissional, referências e demais etapas do processo seletivo. "
+                "A utilização responsável das informações aqui apresentadas contribui para decisões mais consistentes, "
+                "transparentes e alinhadas à cultura organizacional."
             ),
+            size=9,
         )
 
         # saída deluxe
@@ -695,7 +745,7 @@ def gerar_pdf_corporativo(
         return buf
 
     except Exception as e:
-        # fallback simplificado (último recurso) — sem mencionar erro no PDF
+        # fallback simplificado (último recurso)
         st.error(f"Erro crítico na geração do PDF completo. Gerando versão simplificada: {e}")
 
         try:
