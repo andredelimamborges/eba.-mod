@@ -223,6 +223,8 @@ class PDFReport(FPDF):
 
     def _safe(self, s: Optional[str]) -> str:
         s = s or ""
+
+        # substitui caracteres estranhos por equivalentes simples
         rep = {
             "\u2014": "-",
             "\u2013": "-",
@@ -235,11 +237,28 @@ class PDFReport(FPDF):
         }
         for k, v in rep.items():
             s = s.replace(k, v)
+
+        # >>> NOVO: quebra qualquer "palavra" sem espaço muito longa <<<
+        import re as _re
+
+        def _break_long_tokens(text: str, max_len: int = 60) -> str:
+            def _split_token(m):
+                token = m.group(0)
+                chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
+                # adiciona espaço entre os pedaços pra permitir quebra
+                return " ".join(chunks)
+
+            # \S{max_len,} = sequência de caracteres sem espaço com tamanho >= max_len
+            return _re.sub(rf"\S{{{max_len},}}", _split_token, text)
+
+        s = _break_long_tokens(s, max_len=60)
+
+        # encoding seguro
         try:
             return s if self._unicode else s.encode("latin-1", "ignore").decode("latin-1")
         except Exception:
             return s
-
+        
     def cover(self, titulo: str, subtitulo: str, autor: str, versao: str, logo_path: Optional[str] = None) -> None:
         self.add_page()
         if logo_path and os.path.exists(logo_path):
@@ -293,12 +312,9 @@ class PDFReport(FPDF):
         self.ln(1)
 
     def paragraph(self, body: str, size: int = 10) -> None:
-        """Escreve um parágrafo com proteção contra palavras gigantes/estranhas."""
         txt = self._safe(body or "")
         self.set_font(self._family, "", size)
 
-        # 1) quebra artificialmente "palavras" muito longas (sem espaços)
-        #    Ex.: um texto com 200 caracteres seguidos pode derrubar o FPDF.
         import re as _re
 
         def _break_long_tokens(s: str, max_len: int = 60) -> str:
