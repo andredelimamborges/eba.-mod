@@ -14,13 +14,20 @@ import streamlit as st
 
 from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
 
-# cores
-COLOR_CANDIDATO = "#60519b"
-COLOR_IDEAL_MAX = "rgba(46, 213, 115, 0.35)"
-COLOR_IDEAL_MIN = "rgba(46, 213, 115, 0.15)"
-COLOR_WARN = "#F39C12"
-COLOR_GOOD = "#2ECC71"
-COLOR_BAD = "#E74C3C"
+# ======== PALETA DE CORES MAIS CORPORATIVA ========
+# Azul marinho como cor principal
+COLOR_PRIMARY = "#1F4E79"
+COLOR_SECONDARY = "#4F6D7A"
+COLOR_CANDIDATO = "#1F4E79"  # candidato sempre azul corporativo
+
+# Faixa ideal em tons discretos de azul esverdeado
+COLOR_IDEAL_MAX = "rgba(154, 190, 214, 0.5)"
+COLOR_IDEAL_MIN = "rgba(198, 224, 241, 0.35)"
+
+# Cores de status (mais sóbrias)
+COLOR_WARN = "#F0B429"   # âmbar
+COLOR_GOOD = "#2E7D32"   # verde escuro
+COLOR_BAD = "#C62828"    # vermelho escuro
 
 
 # ======== GRÁFICOS ========
@@ -59,7 +66,8 @@ def criar_radar_bfa(
             theta=labels,
             fill="toself",
             name="Candidato",
-            line=dict(color=COLOR_CANDIDATO),
+            line=dict(color=COLOR_CANDIDATO, width=3),
+            fillcolor="rgba(31, 78, 121, 0.3)",
         )
     )
 
@@ -72,7 +80,7 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="toself",
                 name="Faixa Ideal (Máx)",
-                line=dict(color=COLOR_GOOD),
+                line=dict(color=COLOR_GOOD, width=1),
                 fillcolor=COLOR_IDEAL_MAX,
             )
         )
@@ -82,7 +90,7 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="tonext",
                 name="Faixa Ideal (Mín)",
-                line=dict(color=COLOR_GOOD),
+                line=dict(color=COLOR_GOOD, width=1),
                 fillcolor=COLOR_IDEAL_MIN,
             )
         )
@@ -91,7 +99,8 @@ def criar_radar_bfa(
         polar=dict(radialaxis=dict(visible=True, range=[0, 10])),
         showlegend=True,
         title="Big Five x Perfil Ideal",
-        height=500,
+        height=420,
+        margin=dict(l=40, r=40, t=60, b=40),
     )
     return fig
 
@@ -103,10 +112,13 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
     if df.empty or "nota" not in df.columns:
         return None
     df = df.sort_values("nota", ascending=True).tail(15)
+
+    # cores mais discretas, mas distinguindo abaixo/na média/acima
     cores = [
-        COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
+        COLOR_BAD if n < 45 else COLOR_WARN if n < 60 else COLOR_PRIMARY
         for n in df["nota"]
     ]
+
     fig = go.Figure(
         go.Bar(
             x=df["nota"],
@@ -121,11 +133,12 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         title="Competências MS (Top 15)",
         xaxis_title="Nota",
         yaxis_title="",
-        height=600,
+        height=480,
         showlegend=False,
+        margin=dict(l=80, r=40, t=60, b=40),
     )
-    fig.add_vline(x=45, line_dash="dash", line_color=COLOR_WARN)
-    fig.add_vline(x=55, line_dash="dash", line_color=COLOR_GOOD)
+    fig.add_vline(x=45, line_dash="dash", line_color=COLOR_BAD)
+    fig.add_vline(x=60, line_dash="dash", line_color=COLOR_GOOD)
     return fig
 
 
@@ -135,25 +148,25 @@ def criar_gauge_fit(fit_score: float) -> go.Figure:
             mode="gauge+number+delta",
             value=float(fit_score or 0),
             domain={"x": [0, 1], "y": [0, 1]},
-            title={"text": "Fit para o Cargo", "font": {"size": 24}},
+            title={"text": "Fit para o Cargo", "font": {"size": 22}},
             delta={"reference": 70},
             gauge={
-                "axis": {"range": [None, 100]},
-                "bar": {"color": COLOR_CANDIDATO},
+                "axis": {"range": [0, 100]},
+                "bar": {"color": COLOR_PRIMARY},
                 "steps": [
-                    {"range": [0, 40], "color": COLOR_BAD},
-                    {"range": [40, 70], "color": COLOR_WARN},
-                    {"range": [70, 100], "color": COLOR_GOOD},
+                    {"range": [0, 40], "color": "rgba(198, 40, 40, 0.4)"},
+                    {"range": [40, 70], "color": "rgba(240, 180, 41, 0.4)"},
+                    {"range": [70, 100], "color": "rgba(46, 125, 50, 0.4)"},
                 ],
                 "threshold": {
-                    "line": {"color": "#ff0040", "width": 4},
+                    "line": {"color": "#000000", "width": 3},
                     "thickness": 0.75,
                     "value": 70,
                 },
             },
         )
     )
-    fig.update_layout(height=400)
+    fig.update_layout(height=320, margin=dict(l=40, r=40, t=40, b=20))
     return fig
 
 
@@ -170,7 +183,7 @@ def fig_to_png_path(
         return None
 
 
-# ======== PDF ========
+# ======== PDF / FONTES ========
 def _download_font(dst: str, url: str) -> bool:
     try:
         import requests
@@ -213,7 +226,7 @@ class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.set_auto_page_break(auto=True, margin=15)
-        self.set_margins(15, 15, 15)
+        self.set_margins(20, 20, 20)  # um pouco mais centralizado
         self._family = "Helvetica"
         self._unicode = False
 
@@ -222,7 +235,6 @@ class PDFReport(FPDF):
 
     def _safe(self, s: Optional[str]) -> str:
         s = s or ""
-        # substitui caracteres estranhos por equivalentes simples
         rep = {
             "\u2014": "-",
             "\u2013": "-",
@@ -236,13 +248,11 @@ class PDFReport(FPDF):
         for k, v in rep.items():
             s = s.replace(k, v)
 
-        # quebra qualquer "palavra" sem espaço muito longa
         def _break_long_tokens(text: str, max_len: int = 80) -> str:
             def _split_token(m):
                 token = m.group(0)
                 chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
                 return " ".join(chunks)
-
             return re.sub(rf"\S{{{max_len},}}", _split_token, text)
 
         s = _break_long_tokens(s, max_len=80)
@@ -252,7 +262,6 @@ class PDFReport(FPDF):
         except Exception:
             return s
 
-    # wrappers seguros
     def safe_cell(self, w, h=0, txt="", *args, **kwargs):
         txt = self._safe(txt)
         try:
@@ -293,38 +302,37 @@ class PDFReport(FPDF):
         self.add_page()
         if logo_path and os.path.exists(logo_path):
             try:
-                self.image(logo_path, x=15, y=18, w=28)
+                self.image(logo_path, x=20, y=18, w=26)
             except Exception:
                 pass
 
-        # faixa superior
-        self.set_fill_color(96, 81, 155)
-        self.rect(0, 0, self.w, 20, "F")
+        self.set_fill_color(31, 78, 121)  # azul marinho
+        self.rect(0, 0, self.w, 22, "F")
 
-        self.set_y(30)
+        self.set_y(32)
         self.set_font(self._family, "B", 22)
-        self.safe_multi_cell(0, 10, titulo, align="C")
-        self.ln(2)
+        self.safe_multi_cell(0, 9, titulo, align="C")
+        self.ln(1)
         self.set_font(self._family, "", 12)
         self.safe_multi_cell(0, 6, subtitulo, align="C")
-        self.ln(6)
-        self.set_font(self._family, "", 11)
+        self.ln(4)
+        self.set_font(self._family, "", 10)
         self.safe_multi_cell(
             0,
-            7,
+            5,
             f"Desenvolvedor Responsável: {autor}\nVersão: {versao}\nData: {datetime.now():%d/%m/%Y}",
             align="C",
         )
-        self.ln(4)
+        self.ln(2)
 
     def header(self) -> None:
         if self.page_no() == 1:
             return
-        self.set_font(self._family, "B", 10)
+        self.set_font(self._family, "B", 9)
         self.set_text_color(120, 120, 120)
         self.safe_cell(
             0,
-            8,
+            7,
             "Elder Brain Analytics — Relatório Corporativo",
             align="C",
             ln=1,
@@ -341,12 +349,12 @@ class PDFReport(FPDF):
         self.safe_cell(0, 10, f"Página {self.page_no()}", align="C")
 
     def heading(self, title: str) -> None:
-        self.set_font(self._family, "B", 12)
-        self.set_fill_color(96, 81, 155)
+        self.set_font(self._family, "B", 11)
+        self.set_fill_color(31, 78, 121)  # mesmo azul da capa
         self.set_text_color(255, 255, 255)
-        self.safe_cell(0, 10, title.upper(), align="L", ln=1, fill=True)
+        self.safe_cell(0, 8, title.upper(), align="L", ln=1, fill=True)
         self.set_text_color(0, 0, 0)
-        self.ln(2)
+        self.ln(1)
 
     def paragraph(self, body: str, size: int = 10) -> None:
         txt = self._safe(body or "")
@@ -357,14 +365,91 @@ class PDFReport(FPDF):
                 token = m.group(0)
                 chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
                 return " ".join(chunks)
-
             return re.sub(rf"\S{{{max_len},}}", _split_token, s)
 
         txt = _break_long_tokens(txt, max_len=80)
-        self.safe_multi_cell(0, 5, txt)
-        self.ln(1)
+        self.safe_multi_cell(0, 4.5, txt)
+        self.ln(0.5)
 
 
+# ======== RESUMOS DE GRÁFICOS ========
+def _resumo_radar(traits: Dict[str, Any], traits_ideais: Dict[str, Tuple[float, float]]) -> str:
+    if not traits or not traits_ideais:
+        return (
+            "O gráfico de radar compara os traços do candidato com a faixa ideal para o cargo, "
+            "indicando aproximações e lacunas nos principais fatores de personalidade."
+        )
+
+    desvios = []
+    for k, v in traits.items():
+        try:
+            v = float(v or 0)
+        except Exception:
+            continue
+        faixa = traits_ideais.get(k, (0, 10))
+        medio = (faixa[0] + faixa[1]) / 2
+        desvios.append(abs(v - medio))
+
+    if not desvios:
+        return (
+            "O gráfico de radar apresenta o posicionamento geral do candidato frente ao perfil-alvo do cargo."
+        )
+
+    media_desvio = sum(desvios) / len(desvios)
+    if media_desvio <= 1.0:
+        nivel = "bastante alinhado ao perfil ideal"
+    elif media_desvio <= 2.0:
+        nivel = "razoavelmente alinhado, com alguns pontos de atenção"
+    else:
+        nivel = "com diferenças relevantes em relação ao perfil ideal"
+
+    return (
+        f"O gráfico de radar mostra que o conjunto de traços do candidato está {nivel}, "
+        "especialmente nos fatores de maior peso para a função."
+    )
+
+
+def _resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
+    if not competencias:
+        return "Não há competências suficientes para a construção do gráfico correspondente."
+    df = pd.DataFrame(competencias)
+    if "nota" not in df.columns or "nome" not in df.columns:
+        return "As competências não estão estruturadas de forma completa para análise gráfica."
+
+    df = df.sort_values("nota", ascending=False)
+    top = df.head(2)
+    low = df.tail(2)
+
+    destaques = ", ".join(
+        f"{row['nome']} ({int(row['nota'])})" for _, row in top.iterrows()
+    )
+    frag = ", ".join(
+        f"{row['nome']} ({int(row['nota'])})" for _, row in low.iterrows()
+    )
+
+    return (
+        "O gráfico de barras resume as principais competências avaliadas. "
+        f"Entre os destaques positivos estão: {destaques}. "
+        f"Como pontos que merecem maior atenção, observam-se: {frag}."
+    )
+
+
+def _resumo_fit(fit_score: float) -> str:
+    fit = float(fit_score or 0)
+    if fit < 40:
+        nivel = "baixo alinhamento global ao cargo, sugerindo cautela na indicação"
+    elif fit < 70:
+        nivel = "alinhamento moderado ao cargo, indicando necessidade de análise complementar"
+    else:
+        nivel = "alto alinhamento global ao cargo, reforçando a indicação do candidato"
+
+    return (
+        f"O indicador de fit aponta um nível de compatibilidade de aproximadamente {fit:.0f}%. "
+        f"Em termos práticos, isso representa {nivel}."
+    )
+
+
+# ======== GERADOR DE PDF ========
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
@@ -402,26 +487,27 @@ def gerar_pdf_corporativo(
         compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
 
         pdf.set_fill_color(245, 245, 245)
-        pdf.set_draw_color(200, 200, 200)
+        pdf.set_draw_color(210, 210, 210)
         pdf.set_line_width(0.3)
         x0, y0 = pdf.get_x(), pdf.get_y()
-        pdf.rect(x0, y0, pdf.w - 30, 18)
-        pdf.set_xy(x0 + 2, y0 + 2)
+        box_width = pdf.w - 40  # respeitando margens
+        pdf.rect(x0, y0, box_width, 14)
+        pdf.set_xy(x0 + 3, y0 + 2)
         pdf.set_font(pdf._family, "B", 11)
         pdf.safe_cell(
             0,
-            6,
+            5,
             f"DECISÃO: {decisao}   |   COMPATIBILIDADE: {compat:.0f}%",
             ln=1,
         )
         pdf.set_font(pdf._family, "", 9)
         pdf.safe_cell(
             0,
-            6,
+            5,
             "Interpretação baseada em análise comportamental e requisitos do cargo.",
             ln=1,
         )
-        pdf.ln(4)
+        pdf.ln(3)
 
         justificativa = (analysis or {}).get("justificativa_decisao", "")
         if justificativa:
@@ -439,21 +525,23 @@ def gerar_pdf_corporativo(
         for trait_name, valor in traits.items():
             if valor is None:
                 continue
-            pdf.set_font(pdf._family, "B", 10)
-            pdf.safe_cell(70, 6, f"{trait_name}:")
-            pdf.set_font(pdf._family, "", 10)
+            pdf.set_font(pdf._family, "B", 9)
+            pdf.safe_cell(70, 5, f"{trait_name}:")
+            pdf.set_font(pdf._family, "", 9)
             try:
                 txt_val = f"{float(valor):.1f}/10"
             except Exception:
                 txt_val = f"{valor}/10"
-            pdf.safe_cell(0, 6, txt_val, ln=1)
+            pdf.safe_cell(0, 5, txt_val, ln=1)
 
         analise_tracos = (analysis or {}).get("analise_tracos", {}) or {}
         for trait, analise_txt in analise_tracos.items():
             if analise_txt:
                 pdf.paragraph(f"{trait}: {analise_txt}", size=9)
 
-        # 5. VISUALIZAÇÕES (GRÁFICOS)
+        # 5. VISUALIZAÇÕES (GRÁFICOS) — mesma página (deixa o FPDF quebrar sozinho)
+        pdf.heading("5. Visualizações (Gráficos)")
+
         from eba_config import gerar_perfil_cargo_dinamico
 
         perfil = gerar_perfil_cargo_dinamico(cargo)
@@ -465,11 +553,8 @@ def gerar_pdf_corporativo(
             float((analysis or {}).get("compatibilidade_geral", 0) or 0)
         )
 
-        pdf.add_page()
-        pdf.heading("5. Visualizações (Gráficos)")
-
         def _embed(fig: "go.Figure", w: int) -> bool:
-            path = fig_to_png_path(fig, width=1200, height=900, scale=2)
+            path = fig_to_png_path(fig, width=1100, height=700, scale=2)
             if path:
                 try:
                     pdf.image(path, w=w)
@@ -482,15 +567,38 @@ def gerar_pdf_corporativo(
                 return True
             return False
 
-        if not _embed(radar_fig, 180):
-            pdf.paragraph("⚠️ Instale 'kaleido' para embutir gráficos no PDF.", size=9)
-        if comp_fig:
-            if not _embed(comp_fig, 180):
-                pdf.paragraph("⚠️ Falha ao embutir gráfico de Competências.", size=9)
+        # 5.1 Radar
+        if _embed(radar_fig, 170):
+            pdf.ln(1)
+            pdf.set_font(pdf._family, "I", 8)
+            pdf.paragraph(_resumo_radar(traits, perfil.get("traits_ideais", {})), size=8)
         else:
-            pdf.paragraph("Sem competências para exibir.", size=9)
-        if not _embed(gauge_fig, 150):
-            pdf.paragraph("⚠️ Falha ao embutir gráfico de Fit.", size=9)
+            pdf.paragraph("⚠️ Não foi possível renderizar o gráfico de radar.", size=8)
+
+        pdf.ln(1)
+
+        # 5.2 Competências
+        if comp_fig and _embed(comp_fig, 170):
+            pdf.ln(1)
+            pdf.set_font(pdf._family, "I", 8)
+            pdf.paragraph(
+                _resumo_competencias(
+                    (bfa_data or {}).get("competencias_ms", []) or []
+                ),
+                size=8,
+            )
+        else:
+            pdf.paragraph("Sem competências suficientes para exibição gráfica.", size=8)
+
+        pdf.ln(1)
+
+        # 5.3 Gauge Fit
+        if _embed(gauge_fig, 110):
+            pdf.ln(1)
+            pdf.set_font(pdf._family, "I", 8)
+            pdf.paragraph(_resumo_fit(compat), size=8)
+        else:
+            pdf.paragraph("⚠️ Não foi possível renderizar o indicador de fit.", size=8)
 
         # 6. SAÚDE EMOCIONAL
         pdf.heading("6. Saúde Emocional e Resiliência")
@@ -502,8 +610,8 @@ def gerar_pdf_corporativo(
             if v is None:
                 continue
             pdf.set_font(pdf._family, "", 9)
-            pdf.safe_cell(70, 5, f"{k.replace('_', ' ').capitalize()}: ")
-            pdf.safe_cell(0, 5, f"{float(v):.0f}/100", ln=1)
+            pdf.safe_cell(70, 4.5, f"{k.replace('_', ' ').capitalize()}: ")
+            pdf.safe_cell(0, 4.5, f"{float(v):.0f}/100", ln=1)
 
         # 7. PONTOS FORTES / ATENÇÃO
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
@@ -520,15 +628,14 @@ def gerar_pdf_corporativo(
                     pdf.paragraph(f"! {item}", size=10)
 
         # 9/10. RECOMENDAÇÕES / CARGOS ALTERNATIVOS
-        pdf.add_page()
         pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         for i, rec in enumerate(recs, 1):
             if rec:
                 pdf.set_font(pdf._family, "B", 10)
-                pdf.safe_cell(10, 6, f"{i}.")
+                pdf.safe_cell(10, 5, f"{i}.")
                 pdf.set_font(pdf._family, "", 10)
-                pdf.safe_multi_cell(0, 6, rec)
+                pdf.safe_multi_cell(0, 5, rec)
 
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
@@ -539,13 +646,13 @@ def gerar_pdf_corporativo(
                 if not nome_alt:
                     continue
                 pdf.set_font(pdf._family, "B", 10)
-                pdf.safe_multi_cell(0, 6, f"- {nome_alt}")
+                pdf.safe_multi_cell(0, 5, f"- {nome_alt}")
                 if just:
                     pdf.set_font(pdf._family, "", 9)
-                    pdf.safe_multi_cell(0, 5, f"   {just}")
+                    pdf.safe_multi_cell(0, 4.5, f"   {just}")
 
         # rodapé institucional
-        pdf.ln(2)
+        pdf.ln(1.5)
         pdf.set_font(pdf._family, "I", 8)
         pdf.safe_multi_cell(
             0,
@@ -562,7 +669,6 @@ def gerar_pdf_corporativo(
             if isinstance(out_bytes, str):
                 out_bytes = out_bytes.encode("latin-1", "replace")
         except Exception:
-            # fallback interno simples se só a saída quebrar
             fb = PDFReport()
             fb.set_main_family("Helvetica", False)
             fb.add_page()
@@ -597,10 +703,9 @@ def gerar_pdf_corporativo(
             fb.set_main_family("Helvetica", False)
             fb.add_page()
 
-            # título
             fb.set_font(fb._family, "B", 14)
             fb.safe_cell(0, 10, "RELATÓRIO DE ANÁLISE COMPORTAMENTAL", ln=1, align="C")
-            fb.ln(4)
+            fb.ln(3)
 
             candidato = (bfa_data or {}).get("candidato", {}) or {}
             nome_cand = candidato.get("nome", "Não informado")
@@ -610,7 +715,6 @@ def gerar_pdf_corporativo(
             pontos_fortes = (bfa_data or {}).get("pontos_fortes", []) or []
             pontos_atencao = (bfa_data or {}).get("pontos_atencao", []) or []
 
-            # bloco de informações principais
             fb.set_font(fb._family, "", 11)
             fb.safe_multi_cell(
                 0,
@@ -623,37 +727,33 @@ def gerar_pdf_corporativo(
                     f"Compatibilidade Geral: {compat:.0f}%"
                 ),
             )
-            fb.ln(4)
+            fb.ln(3)
 
-            # resumo executivo (se houver)
             if resumo_exec:
                 fb.set_font(fb._family, "B", 11)
-                fb.safe_cell(0, 8, "Resumo Executivo", ln=1)
+                fb.safe_cell(0, 7, "Resumo Executivo", ln=1)
                 fb.set_font(fb._family, "", 10)
                 fb.safe_multi_cell(0, 5, resumo_exec)
-                fb.ln(3)
+                fb.ln(2)
 
-            # pontos fortes
             if pontos_fortes:
                 fb.set_font(fb._family, "B", 11)
-                fb.safe_cell(0, 8, "Pontos Fortes", ln=1)
+                fb.safe_cell(0, 7, "Pontos Fortes", ln=1)
                 fb.set_font(fb._family, "", 10)
                 for item in pontos_fortes[:5]:
                     if item:
                         fb.safe_multi_cell(0, 5, f"+ {item}")
-                fb.ln(2)
+                fb.ln(1)
 
-            # pontos de atenção
             if pontos_atencao:
                 fb.set_font(fb._family, "B", 11)
-                fb.safe_cell(0, 8, "Pontos de Atenção", ln=1)
+                fb.safe_cell(0, 7, "Pontos de Atenção", ln=1)
                 fb.set_font(fb._family, "", 10)
                 for item in pontos_atencao[:5]:
                     if item:
                         fb.safe_multi_cell(0, 5, f"! {item}")
-                fb.ln(2)
+                fb.ln(1)
 
-            # rodapé institucional
             fb.ln(2)
             fb.set_font(fb._family, "I", 8)
             fb.safe_multi_cell(
@@ -681,5 +781,4 @@ def gerar_pdf_corporativo(
 
             return buf
         except Exception:
-            # fallback extremo
             return io.BytesIO(b"%PDF-1.4\n%EOF\n")
