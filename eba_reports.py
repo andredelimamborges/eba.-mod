@@ -238,28 +238,32 @@ class PDFReport(FPDF):
         for k, v in rep.items():
             s = s.replace(k, v)
 
-        # >>> NOVO: quebra qualquer "palavra" sem espaço muito longa <<<
+        # quebra qualquer "palavra" sem espaço muito longa
         import re as _re
 
         def _break_long_tokens(text: str, max_len: int = 60) -> str:
             def _split_token(m):
                 token = m.group(0)
                 chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
-                # adiciona espaço entre os pedaços pra permitir quebra
                 return " ".join(chunks)
 
-            # \S{max_len,} = sequência de caracteres sem espaço com tamanho >= max_len
             return _re.sub(rf"\S{{{max_len},}}", _split_token, text)
 
         s = _break_long_tokens(s, max_len=60)
 
-        # encoding seguro
         try:
             return s if self._unicode else s.encode("latin-1", "ignore").decode("latin-1")
         except Exception:
             return s
-        
-    def cover(self, titulo: str, subtitulo: str, autor: str, versao: str, logo_path: Optional[str] = None) -> None:
+
+    def cover(
+        self,
+        titulo: str,
+        subtitulo: str,
+        autor: str,
+        versao: str,
+        logo_path: Optional[str] = None,
+    ) -> None:
         self.add_page()
         if logo_path and os.path.exists(logo_path):
             try:
@@ -320,13 +324,9 @@ class PDFReport(FPDF):
         def _break_long_tokens(s: str, max_len: int = 60) -> str:
             def _split_token(m):
                 token = m.group(0)
-                chunks = [
-                    token[i : i + max_len] for i in range(0, len(token), max_len)
-                ]
-                # insere espaço entre pedaços para o multi_cell conseguir quebrar
+                chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
                 return " ".join(chunks)
 
-            # \S{max_len,} = sequência de caracteres sem espaço com tamanho >= max_len
             return _re.sub(rf"\S{{{max_len},}}", _split_token, s)
 
         txt = _break_long_tokens(txt, max_len=60)
@@ -334,7 +334,6 @@ class PDFReport(FPDF):
         try:
             self.multi_cell(0, 5, txt)
         except Exception:
-            # fallback extremo: se ainda assim der erro, corta o texto
             try:
                 self.multi_cell(
                     0,
@@ -344,7 +343,6 @@ class PDFReport(FPDF):
                     ),
                 )
             except Exception:
-                # em último caso, ignora o parágrafo
                 pass
         self.ln(1)
 
@@ -356,7 +354,9 @@ def gerar_pdf_corporativo(
     save_path: Optional[str] = None,
     logo_path: Optional[str] = None,
 ) -> io.BytesIO:
-    """Gera o relatório PDF completo (versão deluxe)."""
+    """Gera o relatório PDF completo (versão deluxe).
+    Se algo der errado, cai para uma versão simplificada.
+    """
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
         if _register_montserrat(pdf):
@@ -421,6 +421,7 @@ Data da Análise: {datetime.now():%d/%m/%Y %H:%M}"""
 
         # 5. VISUALIZAÇÕES
         from eba_config import gerar_perfil_cargo_dinamico
+
         perfil = gerar_perfil_cargo_dinamico(cargo)
         radar_fig = criar_radar_bfa(traits, perfil.get("traits_ideais", {}))
         comp_fig = criar_grafico_competencias(
@@ -519,7 +520,7 @@ Data da Análise: {datetime.now():%d/%m/%Y %H:%M}"""
             ),
         )
 
-        # saída
+        # saída deluxe
         try:
             out_bytes = pdf.output(dest="S")
             if isinstance(out_bytes, str):
@@ -551,6 +552,48 @@ Data da Análise: {datetime.now():%d/%m/%Y %H:%M}"""
             except Exception as e:
                 st.error(f"Erro ao salvar PDF: {e}")
         return buf
+
     except Exception as e:
-        st.error(f"Erro crítico na geração do PDF: {e}")
-        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
+        # se o PDF "deluxe" falhar, gera uma versão simplificada em vez de voltar vazio
+        st.error(f"Erro crítico na geração do PDF completo (usando versão simplificada): {e}")
+
+        try:
+            fb = PDFReport()
+            fb.set_main_family("Helvetica", False)
+            fb.add_page()
+            fb.set_font(fb._family, "B", 14)
+            fb.cell(0, 10, fb._safe("RELATÓRIO DE ANÁLISE COMPORTAMENTAL"), ln=1, align="C")
+
+            fb.set_font(fb._family, "", 11)
+            decisao = (analysis or {}).get("decisao", "N/A")
+            compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
+
+            resumo_simplificado = (
+                f"Relatório simplificado para o cargo: {cargo}\n"
+                f"Data: {datetime.now():%d/%m/%Y %H:%M}\n\n"
+                f"Decisão: {decisao}\n"
+                f"Compatibilidade: {compat:.0f}%\n\n"
+                "Observação: a versão detalhada com gráficos encontrou um erro de formatação, "
+                "por isso este PDF foi gerado em modo reduzido."
+            )
+
+            fb.multi_cell(0, 8, fb._safe(resumo_simplificado))
+
+            out_bytes = fb.output(dest="S")
+            if isinstance(out_bytes, str):
+                out_bytes = out_bytes.encode("latin-1", "replace")
+
+            buf = io.BytesIO(out_bytes)
+            buf.seek(0)
+
+            if save_path:
+                try:
+                    with open(save_path, "wb") as f:
+                        f.write(buf.getbuffer())
+                except Exception as e2:
+                    st.error(f"Erro ao salvar PDF simplificado: {e2}")
+
+            return buf
+        except Exception:
+            # fallback extremo: se até o simples quebrar, devolve um PDF mínimo
+            return io.BytesIO(b"%PDF-1.4\n%EOF\n")
