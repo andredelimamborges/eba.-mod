@@ -308,7 +308,8 @@ def main() -> None:
                             f"**{f.get('nome','')}** (Percentil: {f.get('percentil',0):.0f})"
                         )
                         st.caption(f.get("interpretacao", ""))
-                        st.markmarkdown("---")
+                        st.markdown("---")
+
 
         with tab4:
             st.subheader("Plano de Desenvolvimento")
