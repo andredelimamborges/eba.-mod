@@ -4,10 +4,12 @@ from __future__ import annotations
 import os
 import re
 import json
+import smtplib
+from datetime import datetime
 from dataclasses import dataclass, field
+from email.message import EmailMessage
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
 import streamlit as st
 
 from eba_config import (
@@ -102,11 +104,12 @@ def _estimate_tokens(text: str) -> int:
 
 @st.cache_resource(show_spinner=False)
 def get_llm_client_cached(provider: str, api_key: str):
-    """Cria cliente LLM seguro (Groq/OpenAI), ajustando proxies."""
+    """Cria cliente LLM (Groq/OpenAI), sem mexer em proxies customizados."""
     if not api_key:
         raise RuntimeError("Chave da API não configurada. Defina nos Secrets do Streamlit.")
     pv = (provider or "Groq").lower()
 
+    # limpa proxies de ambiente por segurança
     for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
         os.environ.pop(var, None)
 
@@ -114,7 +117,7 @@ def get_llm_client_cached(provider: str, api_key: str):
         if Groq is None:
             raise RuntimeError("SDK Groq não instalado.")
         try:
-            client = Groq(api_key=api_key, http_client=httpx.Client(proxies=None))
+            client = Groq(api_key=api_key)
             return client
         except Exception as e:
             raise RuntimeError(f"[Erro cliente] Groq SDK falhou ({e})")
@@ -123,7 +126,7 @@ def get_llm_client_cached(provider: str, api_key: str):
         if OpenAI is None:
             raise RuntimeError("SDK OpenAI não instalado.")
         try:
-            client = OpenAI(api_key=api_key, http_client=httpx.Client(proxies=None))
+            client = OpenAI(api_key=api_key)
             return client
         except Exception as e:
             raise RuntimeError(f"[Erro cliente] OpenAI SDK falhou ({e})")
@@ -144,6 +147,72 @@ def get_api_key_for_provider(provider: str) -> str:
             raise RuntimeError("OPENAI_API_KEY não configurada nos Secrets do Streamlit.")
         return key
     raise RuntimeError(f"Provedor não suportado: {provider}")
+
+
+def send_admin_report_if_configured(
+    tracker: TokenTracker,
+    provider: str,
+    model: str,
+) -> None:
+    """
+    Envia por email o 'relatório admin' (tokens, custo, modelo, provider),
+    SE e somente se as variáveis de email estiverem configuradas em st.secrets.
+
+    Necessário em .streamlit/secrets.toml:
+      EMAIL_HOST
+      EMAIL_PORT (opcional, default 587)
+      EMAIL_USER
+      EMAIL_PASS
+      EMAIL_TO
+    """
+    try:
+        host = st.secrets.get("EMAIL_HOST", "")
+        user = st.secrets.get("EMAIL_USER", "")
+        pwd = st.secrets.get("EMAIL_PASS", "")
+        to = st.secrets.get("EMAIL_TO", "")
+        port = int(st.secrets.get("EMAIL_PORT", 587))
+
+        if not (host and user and pwd and to):
+            # se não estiver configurado, apenas não envia
+            return
+
+        td = tracker.dict()
+        total_tokens = tracker.total_tokens
+        cost = tracker.cost_usd_gpt()
+
+        linhas = [
+            "Elder Brain Analytics — Uso de Relatório",
+            f"Data/Hora: {datetime.now():%d/%m/%Y %H:%M}",
+            "",
+            f"Provider: {provider}",
+            f"Modelo:   {model}",
+            "",
+            "Uso de tokens por etapa:",
+        ]
+        for step, vals in td.items():
+            linhas.append(
+                f"- {step}: total={vals['total']} "
+                f"(prompt={vals['prompt']} / completion={vals['completion']})"
+            )
+        linhas.append("")
+        linhas.append(f"Total de tokens: {total_tokens}")
+        linhas.append(f"Custo estimado (tabela GPT): ${cost:.4f}")
+
+        body = "\n".join(linhas)
+
+        msg = EmailMessage()
+        msg["Subject"] = "[EBA] Relatório processado (uso de tokens)"
+        msg["From"] = user
+        msg["To"] = to
+        msg.set_content(body)
+
+        with smtplib.SMTP(host, port) as server:
+            server.starttls()
+            server.login(user, pwd)
+            server.send_message(msg)
+    except Exception as e:
+        # não quebra o app – só avisa se estiver na tela
+        st.warning(f"Falha ao enviar email de log admin: {e}")
 
 
 # ======== PROMPTS ========

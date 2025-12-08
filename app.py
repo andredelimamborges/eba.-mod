@@ -26,6 +26,7 @@ from eba_llm import (
     extract_bfa_data,
     analyze_bfa_data,
     chat_with_elder_brain,
+    send_admin_report_if_configured,
 )
 from eba_reports import (
     criar_radar_bfa,
@@ -61,7 +62,6 @@ def main() -> None:
     ss.setdefault("analysis", None)
     ss.setdefault("pdf_generated", None)
     ss.setdefault("tracker", TokenTracker())
-    ss.setdefault("admin_mode", False)
 
     # título
     st.markdown(f"## 🧠 {APP_NAME} — Corporate (PROD • Full)")
@@ -90,71 +90,27 @@ def main() -> None:
         )
         ss["modelo"] = modelo
 
+        # API key via secrets (sem campo visível)
         try:
             token = get_api_key_for_provider(provider)
         except RuntimeError as e:
             token = ""
             st.error(str(e))
 
-        st.caption("Temperatura fixa e limite de tokens configurados internamente.")
+        st.caption("Configuração de IA controlada via secrets (segura).")
         ss["cargo"] = st.text_input("Cargo para análise", value=ss["cargo"])
-        if ss["cargo"]:
-            perfil_sidebar = gerar_perfil_cargo_dinamico(ss["cargo"])
-            with st.expander("Perfil gerado (dinâmico)"):
-                st.json(perfil_sidebar)
 
-        st.markdown("---")
-        st.subheader("🔒 Painel Administrativo")
-        admin_pwd = st.text_input(
-            "Senha do Admin", type="password", placeholder="somente administradores"
-        )
-        if admin_pwd:
-            if admin_pwd == st.secrets.get("ADMIN_PASSWORD", ""):
-                ss["admin_mode"] = True
-                st.success("Acesso administrativo concedido")
-            else:
-                ss["admin_mode"] = False
-                st.error("Senha incorreta")
-        else:
-            ss["admin_mode"] = False
-
-        if ss["admin_mode"]:
-            st.markdown("---")
-            st.header("📈 Token Log")
-            td = ss["tracker"].dict()
-            for step in ["extracao", "analise", "chat", "pdf"]:
-                d = td.get(step, {"prompt": 0, "completion": 0, "total": 0})
-                st.write(
-                    f"- **{step.capitalize()}**: {d['total']} "
-                    f"(prompt {d['prompt']} / output {d['completion']})"
-                )
-            st.write(f"**Total:** {ss['tracker'].total_tokens} tokens")
-            st.write(f"**Custo (estimado):** ${ss['tracker'].cost_usd_gpt():.4f}")
-        else:
-            st.caption("modo usuário — sem métricas financeiras visíveis")
-
-    # KPIs topo
+    # KPIs topo (sem admin, sem custo visível)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        kpi_card("Status", "Pronto", "Aguardando relatório")
-    if ss["admin_mode"]:
-        with c2:
-            kpi_card("Tokens (Total)", f"{ss['tracker'].total_tokens}", "desde o início")
-        with c3:
-            kpi_card(
-                "Prompt/Output",
-                f"{ss['tracker'].total_prompt}/{ss['tracker'].total_completion}",
-                "tokens",
-            )
-        with c4:
-            kpi_card("Custo Estimado", f"${ss['tracker'].cost_usd_gpt():.4f}", "apenas admin")
-    else:
-        with c2:
-            kpi_card("Relatórios", "—", "sessão atual")
-        with c3:
-            kpi_card("Andamento", "—", "")
-        with c4:
-            kpi_card("Disponibilidade", "Online", "")
+        status_txt = "Pronto" if not ss.get("analysis_complete") else "Concluído"
+        kpi_card("Status", status_txt, "Pipeline de análise")
+    with c2:
+        kpi_card("Relatórios (sessão)", "—", "controle futuro")
+    with c3:
+        kpi_card("Andamento", "Online", "IA disponível")
+    with c4:
+        kpi_card("Modo", "Usuário", "sem painel admin")
 
     # upload + treinamento
     st.markdown("### 📄 Upload do Relatório BFA")
@@ -179,6 +135,7 @@ def main() -> None:
             st.error("Informe o cargo na sidebar antes de processar.")
             st.stop()
         if not token:
+            # erro de secrets já foi mostrado
             st.stop()
         if not (ss["modelo"] and ss["modelo"].strip()):
             st.error("Informe o modelo de IA na sidebar.")
@@ -189,8 +146,9 @@ def main() -> None:
         if raw_text.startswith("[ERRO"):
             st.error(raw_text)
             st.stop()
-        st.success("✓ Texto extraído")
-        st.text_area("Prévia do texto (início)", raw_text[:1500], height=180)
+        st.success("✓ Texto extraído com sucesso")
+
+        # (removido: prévia do texto)
 
         if st.button("🔬 ANALISAR RELATÓRIO", type="primary", use_container_width=True):
             training_context = load_all_training_texts()
@@ -236,6 +194,14 @@ def main() -> None:
                 analysis,
                 True,
             )
+
+            # envia o "relatório admin" de tokens/custo por email, se configurado
+            send_admin_report_if_configured(
+                tracker=tracker,
+                provider=ss["provider"],
+                model=ss["modelo"],
+            )
+
             st.success("✓ Análise concluída!")
             st.rerun()
 
@@ -342,7 +308,7 @@ def main() -> None:
                             f"**{f.get('nome','')}** (Percentil: {f.get('percentil',0):.0f})"
                         )
                         st.caption(f.get("interpretacao", ""))
-                        st.markdown("---")
+                        st.markmarkdown("---")
 
         with tab4:
             st.subheader("Plano de Desenvolvimento")

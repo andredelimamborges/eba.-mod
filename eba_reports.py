@@ -8,13 +8,12 @@ import tempfile
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
 import streamlit as st
 
-from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE, PROCESSED_DIR
+from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
 
 # cores
 COLOR_CANDIDATO = "#60519b"

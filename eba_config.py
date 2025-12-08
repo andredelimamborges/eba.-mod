@@ -1,6 +1,9 @@
 # eba_config.py
 from __future__ import annotations
 import os
+from typing import Any, Dict, List
+
+from pdfminer.high_level import extract_text
 
 APP_NAME = "Elder Brain Analytics — Corporate"
 APP_VERSION = "V9.1-PROD"
@@ -47,11 +50,6 @@ header[data-testid="stHeader"] { display:none !important; }
 .stButton>button:hover,.stDownloadButton>button:hover{filter:brightness(1.06)}
 </style>
 """
-
-# helpers simples ligados a dados base
-from datetime import datetime
-from typing import Any, Dict, List
-from pdfminer.high_level import extract_text
 
 
 def gerar_perfil_cargo_dinamico(cargo: str) -> Dict[str, Any]:
