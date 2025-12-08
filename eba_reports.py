@@ -12,12 +12,12 @@ import plotly.graph_objects as go
 from fpdf import FPDF
 import streamlit as st
 
-from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
+from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE, gerar_perfil_cargo_dinamico
 
-# ======== PALETA DE CORES MAIS CORPORATIVA ========
+# ======== PALETA DE CORES CORPORATIVA ========
 COLOR_PRIMARY = "#1F4E79"      # azul marinho principal
 COLOR_SECONDARY = "#4F6D7A"    # azul acinzentado
-COLOR_CANDIDATO = "#1F4E79"    # candidato sempre em azul corporativo
+COLOR_CANDIDATO = COLOR_PRIMARY
 
 COLOR_IDEAL_MAX = "rgba(154, 190, 214, 0.5)"
 COLOR_IDEAL_MIN = "rgba(198, 224, 241, 0.35)"
@@ -27,7 +27,7 @@ COLOR_GOOD = "#2E7D32"         # verde escuro
 COLOR_BAD = "#C62828"          # vermelho escuro
 
 
-# ======== GRÁFICOS ========
+# ================== GRÁFICOS ==================
 def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
@@ -108,8 +108,8 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
     df = pd.DataFrame(competencias).copy()
     if df.empty or "nota" not in df.columns:
         return None
-    df = df.sort_values("nota", ascending=True).tail(15)
 
+    df = df.sort_values("nota", ascending=True).tail(15)
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 60 else COLOR_PRIMARY
         for n in df["nota"]
@@ -169,6 +169,7 @@ def criar_gauge_fit(fit_score: float) -> go.Figure:
 def fig_to_png_path(
     fig: "go.Figure", width: int = 1280, height: int = 800, scale: int = 2
 ) -> Optional[str]:
+    """Exporta figura Plotly para PNG temporário (requer kaleido)."""
     try:
         import plotly.io as pio
 
@@ -179,7 +180,7 @@ def fig_to_png_path(
         return None
 
 
-# ======== PDF / FONTES ========
+# ============== FONTES / MONT SERRAT ==============
 def _download_font(dst: str, url: str) -> bool:
     try:
         import requests
@@ -218,6 +219,7 @@ def _register_montserrat(pdf: FPDF) -> bool:
         return False
 
 
+# ============== CLASSE PDF CORPORATIVO ==============
 class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -249,6 +251,7 @@ class PDFReport(FPDF):
                 token = m.group(0)
                 chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
                 return " ".join(chunks)
+
             return re.sub(rf"\S{{{max_len},}}", _split_token, text)
 
         s = _break_long_tokens(s, max_len=80)
@@ -361,6 +364,7 @@ class PDFReport(FPDF):
                 token = m.group(0)
                 chunks = [token[i : i + max_len] for i in range(0, len(token), max_len)]
                 return " ".join(chunks)
+
             return re.sub(rf"\S{{{max_len},}}", _split_token, s)
 
         txt = _break_long_tokens(txt, max_len=80)
@@ -368,7 +372,7 @@ class PDFReport(FPDF):
         self.ln(0.5)
 
 
-# ======== RESUMOS DE GRÁFICOS (MAIS FORTES) ========
+# ============== RESUMOS DOS GRÁFICOS ==============
 def _resumo_radar(traits: Dict[str, Any], traits_ideais: Dict[str, Tuple[float, float]]) -> str:
     if not traits or not traits_ideais:
         return (
@@ -464,7 +468,7 @@ def _resumo_fit(fit_score: float) -> str:
     )
 
 
-# ======== GERADOR DE PDF ========
+# ============== GERADOR DE PDF COMPLETO ==============
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
@@ -489,12 +493,22 @@ def gerar_pdf_corporativo(
         # 2. INFORMAÇÕES DO CANDIDATO
         pdf.heading("1. Informações do Candidato")
         candidato = bfa_data.get("candidato", {}) or {}
-        info_text = (
-            f"Nome: {candidato.get('nome', 'Não informado')}\n"
-            f"Cargo Avaliado: {cargo}\n"
-            f"Data da Análise: {datetime.now():%d/%m/%Y %H:%M}"
+
+        email_emp = (
+            candidato.get("email_empresarial")
+            or candidato.get("email")
+            or ""
         )
-        pdf.paragraph(info_text, size=10)
+
+        info_lines = [
+            f"Nome: {candidato.get('nome', 'Não informado')}",
+            f"Cargo Avaliado: {cargo}",
+        ]
+        if email_emp:
+            info_lines.append(f"Email empresarial: {email_emp}")
+        info_lines.append(f"Data da Análise: {datetime.now():%d/%m/%Y %H:%M}")
+
+        pdf.paragraph("\n".join(info_lines), size=10)
 
         # 3. DECISÃO E COMPATIBILIDADE
         pdf.heading("2. Decisão e Compatibilidade")
@@ -556,8 +570,6 @@ def gerar_pdf_corporativo(
 
         # 6. VISUALIZAÇÕES (GRÁFICOS)
         pdf.heading("5. Visualizações (Gráficos)")
-
-        from eba_config import gerar_perfil_cargo_dinamico
 
         perfil = gerar_perfil_cargo_dinamico(cargo)
         radar_fig = criar_radar_bfa(traits, perfil.get("traits_ideais", {}))
@@ -654,7 +666,7 @@ def gerar_pdf_corporativo(
                 size=9,
             )
 
-        # 10. RECOMENDAÇÕES DE DESENVOLVIMENTO (inclui cursos/trilhas)
+        # 10. RECOMENDAÇÕES DE DESENVOLVIMENTO + CURSOS/TRILHAS
         pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         for i, rec in enumerate(recs, 1):
@@ -664,7 +676,6 @@ def gerar_pdf_corporativo(
                 pdf.set_font(pdf._family, "", 10)
                 pdf.safe_multi_cell(0, 5, rec)
 
-        # bloco genérico de cursos/trilhas – sempre aparece de forma suave
         pdf.ln(1)
         pdf.set_font(pdf._family, "B", 10)
         pdf.safe_cell(0, 6, "Sugestões complementares de desenvolvimento:", ln=1)
@@ -719,6 +730,7 @@ def gerar_pdf_corporativo(
             if isinstance(out_bytes, str):
                 out_bytes = out_bytes.encode("latin-1", "replace")
         except Exception:
+            # fallback se der erro exatamente na saída
             fb = PDFReport()
             fb.set_main_family("Helvetica", False)
             fb.add_page()
@@ -831,4 +843,5 @@ def gerar_pdf_corporativo(
 
             return buf
         except Exception:
+            # fallback extremo: PDF mínimo para não quebrar workflow
             return io.BytesIO(b"%PDF-1.4\n%EOF\n")
