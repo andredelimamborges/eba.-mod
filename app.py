@@ -258,12 +258,19 @@ def main() -> None:
                 st.stop()
 
             # salvar na sessão
+                        # salvar na sessão
             ss["bfa_data"] = bfa_data
             ss["analysis"] = analysis
             ss["analysis_complete"] = True
 
             st.success("✓ análise concluída!")
-            st.experimental_rerun()
+
+            # rerun compatível com versões novas/antigas do Streamlit
+            if hasattr(st, "rerun"):
+                st.rerun()
+            elif hasattr(st, "experimental_rerun"):
+                st.experimental_rerun()
+
 
     # ===== resultados =====
     if ss.get("analysis_complete") and ss.get("bfa_data") and ss.get("analysis"):
