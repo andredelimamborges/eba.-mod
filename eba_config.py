@@ -1,4 +1,4 @@
-# eba_config.py
+
 from __future__ import annotations
 import os
 from typing import Any, Dict, List
@@ -9,13 +9,13 @@ APP_NAME = "Elder Brain Analytics — Corporate"
 APP_VERSION = "V9.1-PROD"
 APP_TAGLINE = "Relatório de Análise Comportamental com auxílio de IA"
 
-# diretórios
+
 TRAINING_DIR = "training_data"
 PROCESSED_DIR = "relatorios_processados"
 os.makedirs(TRAINING_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 
-# modelos e limites
+
 MODELOS_SUGERIDOS_GROQ = [
     "llama-3.1-8b-instant",
     "llama-3.1-70b-versatile",
@@ -29,11 +29,11 @@ MODELOS_SUGERIDOS_OPENAI = ["gpt-4o-mini", "gpt-4o"]
 MAX_TOKENS_FIXED = 4096
 TEMP_FIXED = 0.3
 
-# preços de referência (apenas estimativa)
+
 GPT_PRICE_INPUT_PER_1K = 0.005
 GPT_PRICE_OUTPUT_PER_1K = 0.015
 
-# tema
+
 DARK_CSS = """
 <style>
 :root{
@@ -73,7 +73,7 @@ def gerar_perfil_cargo_dinamico(cargo: str) -> Dict[str, Any]:
 
 
 def extract_pdf_text_bytes(file) -> str:
-    """Extrai texto de um PDF a partir de um file-like (BytesIO / UploadedFile)."""
+   
     try:
         return extract_text(file)
     except Exception as e:
@@ -81,7 +81,7 @@ def extract_pdf_text_bytes(file) -> str:
 
 
 def load_all_training_texts() -> str:
-    """Carrega PDFs/TXTs da pasta de treinamento e concatena em um contexto textual."""
+    
     texts: List[str] = []
     for fname in sorted(os.listdir(TRAINING_DIR)):
         path = os.path.join(TRAINING_DIR, fname)

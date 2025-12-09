@@ -1,11 +1,3 @@
-# app.py
-"""
-Elder Brain Analytics — Corporate (Módulos)
-Front principal com:
-- Upload de relatório BFA
-- Extração + Análise (via eba_llm)
-- Visualizações e PDF corporativo (via eba_reports)
-"""
 
 from __future__ import annotations
 
@@ -20,7 +12,7 @@ import pandas as pd
 import streamlit as st
 from pdfminer.high_level import extract_text
 
-# ===== imports internos =====
+
 from eba_llm import (
     TokenTracker,
     extract_bfa_data,
@@ -37,7 +29,7 @@ from eba_reports import (
     gerar_pdf_corporativo,
 )
 
-# tentar importar configs/cosmeticos; se não existir, usa defaults
+
 try:
     from eba_config import (
         DARK_CSS,
@@ -45,7 +37,7 @@ try:
         TRAINING_DIR,
         gerar_perfil_cargo_dinamico,
     )
-except Exception:  # fallback seguro
+except Exception:  
     DARK_CSS = ""
     PROCESSED_DIR = "relatorios_processados"
     TRAINING_DIR = "training_data"
@@ -53,14 +45,14 @@ except Exception:  # fallback seguro
     def gerar_perfil_cargo_dinamico(cargo: str) -> Dict[str, Any]:
         return {"traits_ideais": {}, "competencias_criticas": []}
 
-# garantir pastas
+
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 os.makedirs(TRAINING_DIR, exist_ok=True)
 
 
-# ===== utils de PDF / treinamento =====
+
 def extract_pdf_text_bytes(file) -> str:
-    """Lê o PDF enviado e retorna o texto plano."""
+ 
     try:
         return extract_text(file)
     except Exception as e:
@@ -68,10 +60,7 @@ def extract_pdf_text_bytes(file) -> str:
 
 
 def load_all_training_texts() -> str:
-    """
-    Carrega todos os PDFs/TXTs da pasta TRAINING_DIR e junta num contexto.
-    (treinamento em segundo plano, sem UI).
-    """
+    
     texts = []
     try:
         fnames = sorted(os.listdir(TRAINING_DIR))
@@ -93,7 +82,7 @@ def load_all_training_texts() -> str:
     return "\n".join(texts)
 
 
-# ===== componente KPI =====
+
 def kpi_card(title: str, value: str, sub: str | None = None) -> None:
     st.markdown(
         f"""
@@ -107,7 +96,7 @@ def kpi_card(title: str, value: str, sub: str | None = None) -> None:
     )
 
 
-# ===== app principal =====
+
 def main() -> None:
     st.set_page_config(
         page_title="EBA — Corporate",
@@ -130,7 +119,7 @@ def main() -> None:
 
     tracker: TokenTracker = ss["tracker"]
 
-    # ===== topo =====
+   
     st.markdown("## 🧠 Elder Brain Analytics — Corporate")
     st.markdown(
         '<span class="badge">PDF Corporativo</span> '
@@ -139,17 +128,17 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # ===== sidebar (config enxuta) =====
+   
     with st.sidebar:
         st.header("⚙️ configuração")
 
-        # provedor/modelo fixos (Groq) — não aparecem na UI
+       
         provider = "Groq"
         modelo = "llama-3.1-8b-instant"
         ss["provider"] = provider
         ss["modelo"] = modelo
 
-        # token via secrets
+      
         try:
             token = get_api_key_for_provider(provider)
         except Exception as e:
@@ -158,10 +147,10 @@ def main() -> None:
 
         st.caption("motor de ia: Groq · temperatura 0.3 · máx. 4096 tokens")
 
-        # cargo
+       
         ss["cargo"] = st.text_input("Cargo para análise", value=ss.get("cargo", ""))
 
-        # email empresarial
+    
         email_empresarial = st.text_input(
             "Email empresarial (opcional)",
             value=ss.get("email_empresarial", ""),
@@ -169,9 +158,9 @@ def main() -> None:
         )
         ss["email_empresarial"] = email_empresarial
 
-        # perfil dinâmico (ajuda na leitura, mas discreto)
+      
         if ss["cargo"]:
-            from eba_config import gerar_perfil_cargo_dinamico as _perfil  # reforço caso exista
+            from eba_config import gerar_perfil_cargo_dinamico as _perfil 
 
             with st.expander("Perfil gerado (dinâmico)"):
                 st.json(_perfil(ss["cargo"]))
@@ -179,11 +168,11 @@ def main() -> None:
         st.markdown("---")
         st.caption("admin: logs detalhados são enviados por e-mail (quando configurado).")
 
-    # ===== KPIs =====
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         kpi_card("Status", "Pronto", "aguardando PDF")
-    # sem “modo sessão” / sem custo na UI
+
     with c2:
         kpi_card("Relatórios", "—", "")
     with c3:
@@ -191,11 +180,11 @@ def main() -> None:
     with c4:
         kpi_card("Disponibilidade", "Online", "")
 
-    # ===== upload de relatório =====
+
     st.markdown("### 📄 Upload do Relatório BFA")
     uploaded_file = st.file_uploader("Carregue o PDF do relatório BFA", type=["pdf"])
 
-    # ===== processamento =====
+
     if uploaded_file:
         if not ss["cargo"]:
             st.error("Informe o cargo na sidebar antes de processar.")
@@ -214,13 +203,13 @@ def main() -> None:
             st.stop()
         st.success("✓ texto extraído com sucesso")
 
-        # sem prévia de texto para não poluir a UI
+   
 
         if st.button("🔬 ANALISAR RELATÓRIO", type="primary", use_container_width=True):
             with st.spinner("Preparando contexto de treinamento..."):
-                training_context = load_all_training_texts()  # silencioso
+                training_context = load_all_training_texts() 
 
-            # etapa 1 — extração estruturada
+           
             with st.spinner("Etapa 1/2: extraindo dados do relatório..."):
                 bfa_data, raw1 = extract_bfa_data(
                     text=raw_text,
@@ -238,7 +227,7 @@ def main() -> None:
                     st.code(raw1)
                 st.stop()
 
-            # etapa 2 — análise de compatibilidade
+            
             perfil_cargo = gerar_perfil_cargo_dinamico(ss["cargo"])
             with st.spinner("Etapa 2/2: analisando compatibilidade..."):
                 analysis, raw2 = analyze_bfa_data(
@@ -257,22 +246,21 @@ def main() -> None:
                     st.code(raw2)
                 st.stop()
 
-            # salvar na sessão
-                        # salvar na sessão
+           
             ss["bfa_data"] = bfa_data
             ss["analysis"] = analysis
             ss["analysis_complete"] = True
 
             st.success("✓ análise concluída!")
 
-            # rerun compatível com versões novas/antigas do Streamlit
+           
             if hasattr(st, "rerun"):
                 st.rerun()
             elif hasattr(st, "experimental_rerun"):
                 st.experimental_rerun()
 
 
-    # ===== resultados =====
+   
     if ss.get("analysis_complete") and ss.get("bfa_data") and ss.get("analysis"):
         st.markdown("## 📊 Resultados")
 
@@ -304,7 +292,7 @@ def main() -> None:
             ]
         )
 
-        # ---- Big Five ----
+      
         with tab1:
             traits = ss["bfa_data"].get("traits_bfa", {}) or {}
             fig_radar = criar_radar_bfa(
@@ -313,7 +301,7 @@ def main() -> None:
             )
             st.plotly_chart(fig_radar, use_container_width=True)
 
-        # ---- Competências ----
+      
         with tab2:
             comps = ss["bfa_data"].get("competencias_ms", []) or []
             figc = criar_grafico_competencias(comps)
@@ -346,7 +334,7 @@ def main() -> None:
             else:
                 st.warning("Nenhuma competência extraída.")
 
-        # ---- Saúde Emocional ----
+    
         with tab3:
             st.subheader("Saúde Emocional e Resiliência")
             st.write(ss["analysis"].get("saude_emocional_contexto", ""))
@@ -368,7 +356,7 @@ def main() -> None:
                     st.write(f"- **{fct.get('nome','')}**")
                     st.caption(fct.get("interpretacao", ""))
 
-        # ---- Desenvolvimento ----
+       
         with tab4:
             st.subheader("Recomendações de Desenvolvimento")
             recs = ss["analysis"].get("recomendacoes_desenvolvimento", []) or []
@@ -383,7 +371,7 @@ def main() -> None:
                 for c in cargos_alt:
                     st.write(f"- **{c.get('cargo','')}** — {c.get('justificativa','')}")
 
-        # ---- Dados Brutos ----
+       
         with tab5:
             c1, c2 = st.columns(2)
             with c1:
@@ -391,16 +379,16 @@ def main() -> None:
             with c2:
                 st.json(ss["analysis"])
 
-        # gauge de compatibilidade
+       
         st.markdown("### 🎯 Compatibilidade Geral")
         st.plotly_chart(criar_gauge_fit(compat), use_container_width=True)
 
-        # ===== geração de PDF =====
+  
         st.markdown("### 📄 Gerar PDF corporativo")
         logo_path = st.text_input("Caminho para logo (opcional)", value="")
 
         if st.button("🔨 Gerar PDF", key="gen_pdf"):
-            # injeta email empresarial no bfa_data
+           
             email_emp = (ss.get("email_empresarial") or "").strip()
             if email_emp:
                 ss.setdefault("bfa_data", {})
@@ -423,14 +411,14 @@ def main() -> None:
                 logo_path=logo_path if logo_path else None,
             )
 
-            # registra passo pdf no tracker
+           
             tracker.add("pdf", 0, 0)
 
             if buf.getbuffer().nbytes > 100:
                 ss["pdf_generated"] = {"buffer": buf, "filename": fname}
                 st.success(f"✓ PDF gerado: {fname}")
 
-                # envia relatório admin por e-mail, se configurado
+               
                 send_admin_report_if_configured(
                     tracker=tracker,
                     provider=provider,
@@ -448,7 +436,7 @@ def main() -> None:
                 use_container_width=True,
             )
 
-        # ===== chat contextualizado =====
+        
         st.markdown("### 💬 Chat com o Elder Brain")
         q = st.text_input(
             "Pergunte sobre este relatório",

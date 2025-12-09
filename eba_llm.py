@@ -1,4 +1,4 @@
-# eba_llm.py
+
 from __future__ import annotations
 
 import os
@@ -22,24 +22,24 @@ from eba_config import (
     GPT_PRICE_OUTPUT_PER_1K,
 )
 
-# libs opcionais
+
 try:
     import tiktoken
 except Exception:
-    tiktoken = None  # type: ignore
+    tiktoken = None  
 
 try:
     from groq import Groq
 except Exception:
-    Groq = None  # type: ignore
+    Groq = None  
 
 try:
     from openai import OpenAI
 except Exception:
-    OpenAI = None  # type: ignore
+    OpenAI = None  
 
 
-# ======== Token Accounting ========
+
 @dataclass
 class TokenStep:
     prompt: int = 0
@@ -107,12 +107,12 @@ def _estimate_tokens(text: str) -> int:
 
 @st.cache_resource(show_spinner=False)
 def get_llm_client_cached(provider: str, api_key: str):
-    """Cria cliente LLM (Groq/OpenAI) usando o client padrão do SDK."""
+   
     if not api_key:
         raise RuntimeError("Chave da API não configurada. Defina nos Secrets do Streamlit.")
     pv = (provider or "Groq").lower()
 
-    # limpa proxies de ambiente por segurança
+    
     for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
         os.environ.pop(var, None)
 
@@ -157,18 +157,6 @@ def send_admin_report_if_configured(
     model: str,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Envia por email o 'relatório admin' (tokens, custo, modelo, provider)
-    em TEXTO + anexo EXCEL (.xlsx) com UMA LINHA por processamento,
-    já no formato ideal para precificação.
-
-    Necessário em .streamlit/secrets.toml:
-      EMAIL_HOST
-      EMAIL_PORT (opcional, default 587)
-      EMAIL_USER
-      EMAIL_PASS
-      EMAIL_TO
-    """
     meta = meta or {}
     try:
         host = st.secrets.get("EMAIL_HOST", "")
@@ -177,11 +165,11 @@ def send_admin_report_if_configured(
         to = st.secrets.get("EMAIL_TO", "")
         port = int(st.secrets.get("EMAIL_PORT", 587))
 
-        # se não tiver configuração de email, não faz nada
+      
         if not (host and user and pwd and to):
             return
 
-        # ==== DADOS BÁSICOS ====
+     
         td = tracker.dict()
         total_tokens = tracker.total_tokens
         cost = tracker.cost_usd_gpt()
@@ -191,7 +179,7 @@ def send_admin_report_if_configured(
         email_emp = meta.get("email_empresarial", "")
         nome_cand = meta.get("nome_candidato", "")
 
-        # pega cada etapa com segurança
+    
         def _step(name: str) -> Dict[str, int]:
             return td.get(name, {"prompt": 0, "completion": 0, "total": 0})
 
@@ -200,7 +188,7 @@ def send_admin_report_if_configured(
         chat = _step("chat")
         pdf_step = _step("pdf")
 
-        # ==== TEXTO DO EMAIL (igual antes, só pra leitura rápida) ====
+       
         linhas = [
             "Elder Brain Analytics — Uso de Relatório",
             f"Data/Hora: {datetime.now():%d/%m/%Y %H:%M}",
@@ -234,9 +222,9 @@ def send_admin_report_if_configured(
 
         body = "\n".join(linhas)
 
-        # ==== LINHA ÚNICA PARA O EXCEL ====
+   
         row = {
-            # infos gerais
+           
             "data_hora": now_str,
             "provider": provider,
             "model": model,
@@ -244,34 +232,34 @@ def send_admin_report_if_configured(
             "email_empresarial": email_emp,
             "nome_candidato": nome_cand,
 
-            # extracao
+          
             "extracao_prompt": extr["prompt"],
             "extracao_completion": extr["completion"],
             "extracao_total": extr["total"],
 
-            # analise
+        
             "analise_prompt": anal["prompt"],
             "analise_completion": anal["completion"],
             "analise_total": anal["total"],
 
-            # chat
+          
             "chat_prompt": chat["prompt"],
             "chat_completion": chat["completion"],
             "chat_total": chat["total"],
 
-            # pdf
+          
             "pdf_prompt": pdf_step["prompt"],
             "pdf_completion": pdf_step["completion"],
             "pdf_total": pdf_step["total"],
 
-            # agregados
+          
             "total_tokens": total_tokens,
             "custo_usd": round(cost, 6),
         }
 
         df = pd.DataFrame([row])
 
-        # grava em memória (sem arquivo físico)
+
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="uso_tokens")
@@ -279,14 +267,14 @@ def send_admin_report_if_configured(
         output.seek(0)
         excel_bytes = output.read()
 
-        # ==== MONTAGEM DO EMAIL ====
+  
         msg = EmailMessage()
         msg["Subject"] = "[EBA] Relatório processado (uso de tokens)"
         msg["From"] = user
         msg["To"] = to
         msg.set_content(body)
 
-        # anexo Excel em formato “linha única para precificação”
+       
         msg.add_attachment(
             excel_bytes,
             maintype="application",
@@ -301,10 +289,10 @@ def send_admin_report_if_configured(
             server.send_message(msg)
 
     except Exception as e:
-        # não quebra o app, só avisa
+
         st.warning(f"Falha ao enviar email de log admin: {e}")
 
-# ======== PROMPTS ========
+
 EXTRACTION_PROMPT = """Você é um especialista em análise de relatórios BFA (Big Five Analysis) para seleção de talentos.
 Sua tarefa: extrair dados do relatório abaixo e retornar APENAS um JSON válido, sem texto adicional.
 
@@ -399,7 +387,7 @@ def _chat_completion_json(
             }
         return content, usage
 
-    # openai
+
     resp = client.chat.completions.create(
         model=model,
         messages=messages
@@ -434,7 +422,6 @@ def _estimate_and_add(
     tracker.add(step, _estimate_tokens(prompt_text), _estimate_tokens(content))
 
 
-# ======== CORE: extração / análise / chat ========
 def extract_bfa_data(
     text: str,
     cargo: str,
@@ -444,7 +431,7 @@ def extract_bfa_data(
     token: str,
     tracker: TokenTracker,
 ):
-    """Etapa 1: extração em JSON estruturado."""
+
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:
@@ -481,7 +468,7 @@ def analyze_bfa_data(
     token: str,
     tracker: TokenTracker,
 ):
-    """Etapa 2: análise de compatibilidade/fit."""
+
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:
@@ -528,7 +515,7 @@ def chat_with_elder_brain(
     token: str,
     tracker: TokenTracker,
 ) -> str:
-    """Chat contextualizado com o relatório + análise."""
+
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:

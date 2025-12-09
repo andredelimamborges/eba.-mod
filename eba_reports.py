@@ -14,29 +14,24 @@ import streamlit as st
 
 from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE, gerar_perfil_cargo_dinamico
 
-# ======== PALETA DE CORES CORPORATIVA ========
-COLOR_PRIMARY = "#1F4E79"      # azul marinho principal (candidato)
-COLOR_SECONDARY = "#4F6D7A"    # azul acinzentado
 
-COLOR_GOOD = "#2E7D32"         # verde escuro (ideal)
-COLOR_WARN = "#F0B429"         # âmbar
-COLOR_BAD = "#C62828"          # vermelho escuro
+COLOR_PRIMARY = "#1F4E79"      
 
-# faixas ideais em verde, bem distintas do azul do candidato
-COLOR_IDEAL_MAX = "rgba(46, 125, 50, 0.30)"   # verde médio
-COLOR_IDEAL_MIN = "rgba(46, 125, 50, 0.10)"   # verde bem claro
+COLOR_GOOD = "#2E7D32"        
+COLOR_WARN = "#F0B429"         
+COLOR_BAD = "#C62828"         
 
 
-# ================== GRÁFICOS ==================
+COLOR_IDEAL_MAX = "rgba(46, 125, 50, 0.30)"  
+COLOR_IDEAL_MIN = "rgba(46, 125, 50, 0.10)"   
+
+
+
 def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> go.Figure:
-    """
-    Radar com cores bem distintas:
-      - candidato: azul
-      - faixa ideal: faixa verde (mín/máx)
-    """
+   
     labels = [
         "Abertura",
         "Conscienciosidade",
@@ -62,7 +57,7 @@ def criar_radar_bfa(
             vals.append(0.0)
 
     fig = go.Figure()
-    # candidato = azul
+   
     fig.add_trace(
         go.Scatterpolar(
             r=vals,
@@ -110,12 +105,7 @@ def criar_radar_bfa(
 
 
 def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[go.Figure]:
-    """
-    Barras com contraste forte:
-      - <45: vermelho
-      - 45–59: âmbar
-      - >=60: verde
-    """
+    
     if not competencias:
         return None
     df = pd.DataFrame(competencias).copy()
@@ -126,11 +116,11 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
     cores = []
     for n in df["nota"]:
         if n < 45:
-            cores.append("#B71C1C")  # vermelho mais forte
+            cores.append("#B71C1C") 
         elif n < 60:
-            cores.append("#FF8F00")  # âmbar saturado
+            cores.append("#FF8F00")  
         else:
-            cores.append("#1B5E20")  # verde bem escuro
+            cores.append("#1B5E20")  
 
     fig = go.Figure(
         go.Bar(
@@ -197,7 +187,7 @@ def fig_to_png_path(
         return None
 
 
-# ============== FONTES / MONT SERRAT ==============
+
 def _download_font(dst: str, url: str) -> bool:
     try:
         import requests
@@ -236,7 +226,6 @@ def _register_montserrat(pdf: FPDF) -> bool:
         return False
 
 
-# ============== CLASSE PDF CORPORATIVO ==============
 class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -389,7 +378,7 @@ class PDFReport(FPDF):
         self.ln(0.5)
 
 
-# ============== RESUMOS DOS GRÁFICOS ==============
+
 def _resumo_radar(traits: Dict[str, Any], traits_ideais: Dict[str, Tuple[float, float]]) -> str:
     if not traits or not traits_ideais:
         return (
@@ -485,7 +474,7 @@ def _resumo_fit(fit_score: float) -> str:
     )
 
 
-# ============== GERADOR DE PDF COMPLETO ==============
+
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
@@ -493,10 +482,7 @@ def gerar_pdf_corporativo(
     save_path: Optional[str] = None,
     logo_path: Optional[str] = None,
 ) -> io.BytesIO:
-    """
-    Gera o relatório PDF completo (versão deluxe).
-    Se algo der errado, cai para uma versão simplificada, mas corporativa.
-    """
+    
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
         if _register_montserrat(pdf):
@@ -504,10 +490,10 @@ def gerar_pdf_corporativo(
         else:
             pdf.set_main_family("Helvetica", False)
 
-        # 1. CAPA
+       
         pdf.cover(APP_NAME, APP_TAGLINE, "André de Lima", APP_VERSION, logo_path)
 
-        # 2. INFORMAÇÕES DO CANDIDATO
+        
         pdf.heading("1. Informações do Candidato")
         candidato = bfa_data.get("candidato", {}) or {}
 
@@ -527,7 +513,7 @@ def gerar_pdf_corporativo(
 
         pdf.paragraph("\n".join(info_lines), size=10)
 
-        # 3. DECISÃO E COMPATIBILIDADE
+       
         pdf.heading("2. Decisão e Compatibilidade")
         decisao = (analysis or {}).get("decisao", "N/A")
         compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
@@ -559,13 +545,13 @@ def gerar_pdf_corporativo(
         if justificativa:
             pdf.paragraph(justificativa, size=10)
 
-        # 4. RESUMO EXECUTIVO
+       
         pdf.heading("3. Resumo Executivo")
         resumo = (analysis or {}).get("resumo_executivo", justificativa)
         if resumo:
             pdf.paragraph(resumo, size=10)
 
-        # 5. BIG FIVE
+       
         pdf.heading("4. Traços de Personalidade (Big Five)")
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
         for trait_name, valor in traits.items():
@@ -585,7 +571,7 @@ def gerar_pdf_corporativo(
             if analise_txt:
                 pdf.paragraph(f"{trait}: {analise_txt}", size=9)
 
-        # 6. VISUALIZAÇÕES (GRÁFICOS)
+       
         pdf.heading("5. Visualizações (Gráficos)")
 
         perfil = gerar_perfil_cargo_dinamico(cargo)
@@ -598,10 +584,7 @@ def gerar_pdf_corporativo(
         )
 
         def _embed(fig: "go.Figure", w: int, center: bool = False) -> bool:
-            """
-            Embute uma figura no PDF.
-            Se center=True, centraliza a imagem horizontalmente.
-            """
+           
             path = fig_to_png_path(fig, width=1100, height=700, scale=2)
             if path:
                 try:
@@ -619,7 +602,7 @@ def gerar_pdf_corporativo(
                 return True
             return False
 
-        # 5.1 Radar
+     
         if _embed(radar_fig, 170, center=False):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
@@ -629,7 +612,7 @@ def gerar_pdf_corporativo(
 
         pdf.ln(1)
 
-        # 5.2 Competências
+      
         if comp_fig and _embed(comp_fig, 170, center=False):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
@@ -644,7 +627,7 @@ def gerar_pdf_corporativo(
 
         pdf.ln(1)
 
-        # 5.3 Gauge Fit — CENTRALIZADO
+       
         if _embed(gauge_fig, 110, center=True):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
@@ -652,7 +635,7 @@ def gerar_pdf_corporativo(
         else:
             pdf.paragraph("⚠️ Não foi possível renderizar o indicador de fit.", size=8)
 
-        # 7. SAÚDE EMOCIONAL
+        
         pdf.heading("6. Saúde Emocional e Resiliência")
         saude = (analysis or {}).get("saude_emocional_contexto", "")
         if saude:
@@ -665,7 +648,7 @@ def gerar_pdf_corporativo(
             pdf.safe_cell(70, 4.5, f"{k.replace('_', ' ').capitalize()}: ")
             pdf.safe_cell(0, 4.5, f"{float(v):.0f}/100", ln=1)
 
-        # 8. PONTOS FORTES
+       
         pdf.heading("7. Pontos Fortes")
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
         if pf:
@@ -678,7 +661,7 @@ def gerar_pdf_corporativo(
                 size=9,
             )
 
-        # 9. PONTOS DE ATENÇÃO
+        
         pdf.heading("8. Pontos de Atenção")
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
         if pa:
@@ -691,7 +674,7 @@ def gerar_pdf_corporativo(
                 size=9,
             )
 
-        # 10. RECOMENDAÇÕES DE DESENVOLVIMENTO + CURSOS/TRILHAS
+       
         pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         for i, rec in enumerate(recs, 1):
@@ -716,7 +699,7 @@ def gerar_pdf_corporativo(
             ),
         )
 
-        # 11. CARGOS ALTERNATIVOS
+       
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         pdf.heading("10. Cargos Alternativos Sugeridos")
         if cargos_alt:
@@ -737,7 +720,7 @@ def gerar_pdf_corporativo(
                 size=9,
             )
 
-        # 12. RODAPÉ / CONSIDERAÇÕES FINAIS
+        
         pdf.heading("11. Considerações Finais")
         pdf.paragraph(
             (
@@ -749,13 +732,13 @@ def gerar_pdf_corporativo(
             size=9,
         )
 
-        # saída deluxe
+       
         try:
             out_bytes = pdf.output(dest="S")
             if isinstance(out_bytes, str):
                 out_bytes = out_bytes.encode("latin-1", "replace")
         except Exception:
-            # fallback se der erro exatamente na saída
+            
             fb = PDFReport()
             fb.set_main_family("Helvetica", False)
             fb.add_page()
@@ -782,7 +765,7 @@ def gerar_pdf_corporativo(
         return buf
 
     except Exception as e:
-        # fallback simplificado (último recurso)
+       
         st.error(f"Erro crítico na geração do PDF completo. Gerando versão simplificada: {e}")
 
         try:
@@ -868,5 +851,5 @@ def gerar_pdf_corporativo(
 
             return buf
         except Exception:
-            # fallback extremo: PDF mínimo para não quebrar workflow
+           
             return io.BytesIO(b"%PDF-1.4\n%EOF\n")
