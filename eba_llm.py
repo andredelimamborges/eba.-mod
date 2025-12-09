@@ -9,6 +9,9 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional, Tuple
+import io
+import pandas as pd
+
 
 import streamlit as st
 
@@ -152,10 +155,11 @@ def send_admin_report_if_configured(
     tracker: TokenTracker,
     provider: str,
     model: str,
+    meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
-    Envia por email o 'relatório admin' (tokens, custo, modelo, provider),
-    SE e somente se as variáveis de email estiverem configuradas em st.secrets.
+    Envia por email o 'relatório admin' (tokens, custo, modelo, provider)
+    em TEXTO + anexo EXCEL (.xlsx).
 
     Necessário em .streamlit/secrets.toml:
       EMAIL_HOST
@@ -163,7 +167,16 @@ def send_admin_report_if_configured(
       EMAIL_USER
       EMAIL_PASS
       EMAIL_TO
+
+    Parâmetro meta (opcional):
+      - pode conter, por exemplo:
+        {
+          "cargo": "...",
+          "email_empresarial": "...",
+          "nome_candidato": "..."
+        }
     """
+    meta = meta or {}
     try:
         host = st.secrets.get("EMAIL_HOST", "")
         user = st.secrets.get("EMAIL_USER", "")
@@ -171,23 +184,40 @@ def send_admin_report_if_configured(
         to = st.secrets.get("EMAIL_TO", "")
         port = int(st.secrets.get("EMAIL_PORT", 587))
 
+        # se não tiver configuração de email, não faz nada
         if not (host and user and pwd and to):
-            # se não estiver configurado, apenas não envia
             return
 
+        # ==== DADOS BÁSICOS ====
         td = tracker.dict()
         total_tokens = tracker.total_tokens
         cost = tracker.cost_usd_gpt()
 
+        cargo = meta.get("cargo", "")
+        email_emp = meta.get("email_empresarial", "")
+        nome_cand = meta.get("nome_candidato", "")
+
+        # ==== TEXTO DO EMAIL ====
         linhas = [
             "Elder Brain Analytics — Uso de Relatório",
             f"Data/Hora: {datetime.now():%d/%m/%Y %H:%M}",
             "",
             f"Provider: {provider}",
             f"Modelo:   {model}",
-            "",
-            "Uso de tokens por etapa:",
         ]
+
+        if cargo or email_emp or nome_cand:
+            linhas.append("")
+            linhas.append("Contexto do processamento:")
+            if nome_cand:
+                linhas.append(f"- Candidato: {nome_cand}")
+            if cargo:
+                linhas.append(f"- Cargo avaliado: {cargo}")
+            if email_emp:
+                linhas.append(f"- Email empresarial: {email_emp}")
+
+        linhas.append("")
+        linhas.append("Uso de tokens por etapa:")
         for step, vals in td.items():
             linhas.append(
                 f"- {step}: total={vals['total']} "
@@ -199,20 +229,78 @@ def send_admin_report_if_configured(
 
         body = "\n".join(linhas)
 
+        # ==== DATAFRAME → EXCEL ====
+        rows = []
+        for step, vals in td.items():
+            rows.append(
+                {
+                    "etapa": step,
+                    "prompt_tokens": vals["prompt"],
+                    "completion_tokens": vals["completion"],
+                    "total_tokens": vals["total"],
+                    "provider": provider,
+                    "model": model,
+                    "cargo": cargo,
+                    "email_empresarial": email_emp,
+                    "nome_candidato": nome_cand,
+                    "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                }
+            )
+
+        df = pd.DataFrame(rows)
+
+        # linha agregada TOTAL
+        df_total = pd.DataFrame(
+            [
+                {
+                    "etapa": "TOTAL",
+                    "prompt_tokens": tracker.total_prompt,
+                    "completion_tokens": tracker.total_completion,
+                    "total_tokens": tracker.total_tokens,
+                    "provider": provider,
+                    "model": model,
+                    "cargo": cargo,
+                    "email_empresarial": email_emp,
+                    "nome_candidato": nome_cand,
+                    "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                }
+            ]
+        )
+
+        df = pd.concat([df, df_total], ignore_index=True)
+
+        # grava em memória (sem arquivo físico)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="uso_tokens")
+
+        output.seek(0)
+        excel_bytes = output.read()
+
+        # ==== MONTAGEM DO EMAIL ====
         msg = EmailMessage()
         msg["Subject"] = "[EBA] Relatório processado (uso de tokens)"
         msg["From"] = user
         msg["To"] = to
         msg.set_content(body)
 
+        # anexo Excel
+        msg.add_attachment(
+            excel_bytes,
+            maintype="application",
+            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=f"eba_uso_tokens_{datetime.now():%Y%m%d_%H%M}.xlsx",
+        )
+
+        # envio
         with smtplib.SMTP(host, port) as server:
             server.starttls()
             server.login(user, pwd)
             server.send_message(msg)
-    except Exception as e:
-        # não quebra o app – só avisa se estiver na tela
-        st.warning(f"Falha ao enviar email de log admin: {e}")
 
+    except Exception as e:
+        # não quebra o app, só avisa
+        st.warning(f"Falha ao enviar email de log admin: {e}")
 
 # ======== PROMPTS ========
 EXTRACTION_PROMPT = """Você é um especialista em análise de relatórios BFA (Big Five Analysis) para seleção de talentos.
