@@ -159,7 +159,8 @@ def send_admin_report_if_configured(
 ) -> None:
     """
     Envia por email o 'relatório admin' (tokens, custo, modelo, provider)
-    em TEXTO + anexo EXCEL (.xlsx).
+    em TEXTO + anexo EXCEL (.xlsx) com UMA LINHA por processamento,
+    já no formato ideal para precificação.
 
     Necessário em .streamlit/secrets.toml:
       EMAIL_HOST
@@ -167,14 +168,6 @@ def send_admin_report_if_configured(
       EMAIL_USER
       EMAIL_PASS
       EMAIL_TO
-
-    Parâmetro meta (opcional):
-      - pode conter, por exemplo:
-        {
-          "cargo": "...",
-          "email_empresarial": "...",
-          "nome_candidato": "..."
-        }
     """
     meta = meta or {}
     try:
@@ -192,18 +185,41 @@ def send_admin_report_if_configured(
         td = tracker.dict()
         total_tokens = tracker.total_tokens
         cost = tracker.cost_usd_gpt()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         cargo = meta.get("cargo", "")
         email_emp = meta.get("email_empresarial", "")
         nome_cand = meta.get("nome_candidato", "")
 
-        # ==== TEXTO DO EMAIL ====
+        # pega cada etapa com segurança
+        def _step(name: str) -> Dict[str, int]:
+            return td.get(name, {"prompt": 0, "completion": 0, "total": 0})
+
+        extr = _step("extracao")
+        anal = _step("analise")
+        chat = _step("chat")
+        pdf_step = _step("pdf")
+
+        # ==== TEXTO DO EMAIL (igual antes, só pra leitura rápida) ====
         linhas = [
             "Elder Brain Analytics — Uso de Relatório",
             f"Data/Hora: {datetime.now():%d/%m/%Y %H:%M}",
             "",
             f"Provider: {provider}",
             f"Modelo:   {model}",
+            "",
+            "Uso de tokens por etapa:",
+            f"- extracao: total={extr['total']} "
+            f"(prompt={extr['prompt']} / completion={extr['completion']})",
+            f"- analise: total={anal['total']} "
+            f"(prompt={anal['prompt']} / completion={anal['completion']})",
+            f"- chat: total={chat['total']} "
+            f"(prompt={chat['prompt']} / completion={chat['completion']})",
+            f"- pdf: total={pdf_step['total']} "
+            f"(prompt={pdf_step['prompt']} / completion={pdf_step['completion']})",
+            "",
+            f"Total de tokens: {total_tokens}",
+            f"Custo estimado (tabela GPT): ${cost:.4f}",
         ]
 
         if cargo or email_emp or nome_cand:
@@ -216,58 +232,44 @@ def send_admin_report_if_configured(
             if email_emp:
                 linhas.append(f"- Email empresarial: {email_emp}")
 
-        linhas.append("")
-        linhas.append("Uso de tokens por etapa:")
-        for step, vals in td.items():
-            linhas.append(
-                f"- {step}: total={vals['total']} "
-                f"(prompt={vals['prompt']} / completion={vals['completion']})"
-            )
-        linhas.append("")
-        linhas.append(f"Total de tokens: {total_tokens}")
-        linhas.append(f"Custo estimado (tabela GPT): ${cost:.4f}")
-
         body = "\n".join(linhas)
 
-        # ==== DATAFRAME → EXCEL ====
-        rows = []
-        for step, vals in td.items():
-            rows.append(
-                {
-                    "etapa": step,
-                    "prompt_tokens": vals["prompt"],
-                    "completion_tokens": vals["completion"],
-                    "total_tokens": vals["total"],
-                    "provider": provider,
-                    "model": model,
-                    "cargo": cargo,
-                    "email_empresarial": email_emp,
-                    "nome_candidato": nome_cand,
-                    "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                }
-            )
+        # ==== LINHA ÚNICA PARA O EXCEL ====
+        row = {
+            # infos gerais
+            "data_hora": now_str,
+            "provider": provider,
+            "model": model,
+            "cargo": cargo,
+            "email_empresarial": email_emp,
+            "nome_candidato": nome_cand,
 
-        df = pd.DataFrame(rows)
+            # extracao
+            "extracao_prompt": extr["prompt"],
+            "extracao_completion": extr["completion"],
+            "extracao_total": extr["total"],
 
-        # linha agregada TOTAL
-        df_total = pd.DataFrame(
-            [
-                {
-                    "etapa": "TOTAL",
-                    "prompt_tokens": tracker.total_prompt,
-                    "completion_tokens": tracker.total_completion,
-                    "total_tokens": tracker.total_tokens,
-                    "provider": provider,
-                    "model": model,
-                    "cargo": cargo,
-                    "email_empresarial": email_emp,
-                    "nome_candidato": nome_cand,
-                    "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                }
-            ]
-        )
+            # analise
+            "analise_prompt": anal["prompt"],
+            "analise_completion": anal["completion"],
+            "analise_total": anal["total"],
 
-        df = pd.concat([df, df_total], ignore_index=True)
+            # chat
+            "chat_prompt": chat["prompt"],
+            "chat_completion": chat["completion"],
+            "chat_total": chat["total"],
+
+            # pdf
+            "pdf_prompt": pdf_step["prompt"],
+            "pdf_completion": pdf_step["completion"],
+            "pdf_total": pdf_step["total"],
+
+            # agregados
+            "total_tokens": total_tokens,
+            "custo_usd": round(cost, 6),
+        }
+
+        df = pd.DataFrame([row])
 
         # grava em memória (sem arquivo físico)
         output = io.BytesIO()
@@ -284,7 +286,7 @@ def send_admin_report_if_configured(
         msg["To"] = to
         msg.set_content(body)
 
-        # anexo Excel
+        # anexo Excel em formato “linha única para precificação”
         msg.add_attachment(
             excel_bytes,
             maintype="application",
