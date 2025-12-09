@@ -15,16 +15,16 @@ import streamlit as st
 from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE, gerar_perfil_cargo_dinamico
 
 # ======== PALETA DE CORES CORPORATIVA ========
-COLOR_PRIMARY = "#1F4E79"      # azul marinho principal
+COLOR_PRIMARY = "#1F4E79"      # azul marinho principal (candidato)
 COLOR_SECONDARY = "#4F6D7A"    # azul acinzentado
-COLOR_CANDIDATO = COLOR_PRIMARY
 
-COLOR_IDEAL_MAX = "rgba(154, 190, 214, 0.5)"
-COLOR_IDEAL_MIN = "rgba(198, 224, 241, 0.35)"
-
+COLOR_GOOD = "#2E7D32"         # verde escuro (ideal)
 COLOR_WARN = "#F0B429"         # âmbar
-COLOR_GOOD = "#2E7D32"         # verde escuro
 COLOR_BAD = "#C62828"          # vermelho escuro
+
+# faixas ideais em verde, bem distintas do azul do candidato
+COLOR_IDEAL_MAX = "rgba(46, 125, 50, 0.30)"   # verde médio
+COLOR_IDEAL_MIN = "rgba(46, 125, 50, 0.10)"   # verde bem claro
 
 
 # ================== GRÁFICOS ==================
@@ -32,6 +32,11 @@ def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> go.Figure:
+    """
+    Radar com cores bem distintas:
+      - candidato: azul
+      - faixa ideal: faixa verde (mín/máx)
+    """
     labels = [
         "Abertura",
         "Conscienciosidade",
@@ -57,17 +62,19 @@ def criar_radar_bfa(
             vals.append(0.0)
 
     fig = go.Figure()
+    # candidato = azul
     fig.add_trace(
         go.Scatterpolar(
             r=vals,
             theta=labels,
             fill="toself",
-            name="Candidato",
-            line=dict(color=COLOR_CANDIDATO, width=3),
-            fillcolor="rgba(31, 78, 121, 0.3)",
+            name="Perfil do Candidato",
+            line=dict(color=COLOR_PRIMARY, width=3),
+            fillcolor="rgba(31, 78, 121, 0.45)",
         )
     )
 
+    # ideal = faixa verde
     if traits_ideais:
         vmin = [traits_ideais.get(k, (0, 10))[0] for k in labels]
         vmax = [traits_ideais.get(k, (0, 10))[1] for k in labels]
@@ -76,7 +83,7 @@ def criar_radar_bfa(
                 r=vmax,
                 theta=labels,
                 fill="toself",
-                name="Faixa Ideal (Máx)",
+                name="Faixa Ideal (limite superior)",
                 line=dict(color=COLOR_GOOD, width=1),
                 fillcolor=COLOR_IDEAL_MAX,
             )
@@ -86,7 +93,7 @@ def criar_radar_bfa(
                 r=vmin,
                 theta=labels,
                 fill="tonext",
-                name="Faixa Ideal (Mín)",
+                name="Faixa Ideal (limite inferior)",
                 line=dict(color=COLOR_GOOD, width=1),
                 fillcolor=COLOR_IDEAL_MIN,
             )
@@ -103,6 +110,12 @@ def criar_radar_bfa(
 
 
 def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[go.Figure]:
+    """
+    Barras com contraste forte:
+      - <45: vermelho
+      - 45–59: âmbar
+      - >=60: verde
+    """
     if not competencias:
         return None
     df = pd.DataFrame(competencias).copy()
@@ -110,10 +123,14 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         return None
 
     df = df.sort_values("nota", ascending=True).tail(15)
-    cores = [
-        COLOR_BAD if n < 45 else COLOR_WARN if n < 60 else COLOR_PRIMARY
-        for n in df["nota"]
-    ]
+    cores = []
+    for n in df["nota"]:
+        if n < 45:
+            cores.append("#B71C1C")  # vermelho mais forte
+        elif n < 60:
+            cores.append("#FF8F00")  # âmbar saturado
+        else:
+            cores.append("#1B5E20")  # verde bem escuro
 
     fig = go.Figure(
         go.Bar(
@@ -580,11 +597,19 @@ def gerar_pdf_corporativo(
             float((analysis or {}).get("compatibilidade_geral", 0) or 0)
         )
 
-        def _embed(fig: "go.Figure", w: int) -> bool:
+        def _embed(fig: "go.Figure", w: int, center: bool = False) -> bool:
+            """
+            Embute uma figura no PDF.
+            Se center=True, centraliza a imagem horizontalmente.
+            """
             path = fig_to_png_path(fig, width=1100, height=700, scale=2)
             if path:
                 try:
-                    pdf.image(path, w=w)
+                    if center:
+                        x = (pdf.w - w) / 2.0
+                        pdf.image(path, x=x, w=w)
+                    else:
+                        pdf.image(path, w=w)
                 except Exception:
                     pass
                 try:
@@ -595,7 +620,7 @@ def gerar_pdf_corporativo(
             return False
 
         # 5.1 Radar
-        if _embed(radar_fig, 170):
+        if _embed(radar_fig, 170, center=False):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
             pdf.paragraph(_resumo_radar(traits, perfil.get("traits_ideais", {})), size=8)
@@ -605,7 +630,7 @@ def gerar_pdf_corporativo(
         pdf.ln(1)
 
         # 5.2 Competências
-        if comp_fig and _embed(comp_fig, 170):
+        if comp_fig and _embed(comp_fig, 170, center=False):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
             pdf.paragraph(
@@ -619,8 +644,8 @@ def gerar_pdf_corporativo(
 
         pdf.ln(1)
 
-        # 5.3 Gauge Fit
-        if _embed(gauge_fig, 110):
+        # 5.3 Gauge Fit — CENTRALIZADO
+        if _embed(gauge_fig, 110, center=True):
             pdf.ln(1)
             pdf.set_font(pdf._family, "I", 8)
             pdf.paragraph(_resumo_fit(compat), size=8)
@@ -640,7 +665,7 @@ def gerar_pdf_corporativo(
             pdf.safe_cell(70, 4.5, f"{k.replace('_', ' ').capitalize()}: ")
             pdf.safe_cell(0, 4.5, f"{float(v):.0f}/100", ln=1)
 
-        # 8. PONTOS FORTES (sempre aparece)
+        # 8. PONTOS FORTES
         pdf.heading("7. Pontos Fortes")
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
         if pf:
@@ -653,7 +678,7 @@ def gerar_pdf_corporativo(
                 size=9,
             )
 
-        # 9. PONTOS DE ATENÇÃO (sempre aparece)
+        # 9. PONTOS DE ATENÇÃO
         pdf.heading("8. Pontos de Atenção")
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
         if pa:
