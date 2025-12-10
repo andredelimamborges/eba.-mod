@@ -385,18 +385,22 @@ def main():
     if bfa_data and analysis and perfil_cargo:
         st.markdown("## Resultado do Laudo")
 
+        # ===================== MÉTRICAS DE TOPO =====================
         col_a, col_b, col_c = st.columns(3)
         compat = float(analysis.get("compatibilidade_geral", 0) or 0)
         decisao = analysis.get("decisao", "N/A")
         traits = (bfa_data.get("traits_bfa") or {}) or {}
+        indicadores = (bfa_data.get("indicadores_saude_emocional") or {}) or {}
+        competencias = (bfa_data.get("competencias_ms") or []) or []
+
+        neuro = float(traits.get("Neuroticismo", 0) or 0)
 
         with col_a:
             st.metric("Compatibilidade geral", f"{compat:.0f}%")
         with col_b:
             st.metric("Decisão", decisao)
         with col_c:
-            neuro = traits.get("Neuroticismo", "N/D")
-            st.metric("Neuroticismo (quanto menor, melhor)", f"{neuro}")
+            st.metric("Neuroticismo (quanto menor, melhor)", f"{neuro:.1f}")
 
         st.markdown(
             f"**Candidato:** {nome_candidato}  \n"
@@ -404,90 +408,190 @@ def main():
             f"**Cargo avaliado:** {cargo_result}"
         )
 
+        # ===================== RESUMO EXECUTIVO PREMIUM =====================
+        st.markdown("### 📌 Resumo Executivo Premium")
+
+        resumo_exec = analysis.get("resumo_executivo", "")
+
+        # forças em competências
+        comp_fortes = [c for c in competencias if c.get("nota", 0) >= 55]
+        comp_criticas = [c for c in competencias if c.get("nota", 0) < 45]
+
+        nomes_fortes = [c["nome"] for c in comp_fortes][:3]
+        nomes_crit = [c["nome"] for c in comp_criticas][:3]
+
+        # leitura de risco emocional
+        risco_emocional = "moderado"
+        if neuro > 60 or any((float(v or 0) >= 70) for v in indicadores.values()):
+            risco_emocional = "elevado"
+        elif neuro < 45 and all((float(v or 0) < 55) for v in indicadores.values()):
+            risco_emocional = "baixo"
+
+        col_r1, col_r2 = st.columns(2)
+
+        with col_r1:
+            st.markdown("**Visão geral do perfil**")
+            st.markdown(
+                f"- Compatibilidade geral: **{compat:.0f}%** → decisão: **{decisao}**.  \n"
+                f"- Risco emocional: **{risco_emocional}** (neuroticismo em {neuro:.1f}/10)."
+            )
+
+            if nomes_fortes:
+                st.markdown("**Principais forças observadas:**")
+                for n in nomes_fortes:
+                    st.markdown(f"- {n}")
+            else:
+                st.markdown("Não foram destacadas forças claras nas competências estruturadas.")
+
+        with col_r2:
+            st.markdown("**Pontos de atenção**")
+            if nomes_crit:
+                for n in nomes_crit:
+                    st.markdown(f"- {n}")
+            else:
+                st.markdown("- Nenhum ponto crítico forte nas competências estruturadas.")
+
+            if resumo_exec:
+                st.markdown("**Síntese da IA:**")
+                st.write(resumo_exec)
+
         st.markdown("---")
 
-        # prepara gráficos
-        competencias = (bfa_data or {}).get("competencias_ms", []) or []
+        # ===================== PREPARA GRÁFICOS =====================
         radar_fig = criar_radar_bfa(traits, perfil_cargo.get("traits_ideais", {}))
         comp_fig = criar_grafico_competencias(competencias)
         gauge_fig = criar_gauge_fit(compat)
 
-        # ========= ABAS =========
+        # ===================== ABAS =====================
         tab_bfa, tab_comp, tab_saude, tab_dev, tab_raw = st.tabs(
             ["🎯 Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados Brutos"]
         )
 
+        # ------------------------------------------------------------
         # 🎯 BIG FIVE
+        # ------------------------------------------------------------
         with tab_bfa:
-            st.markdown("#### Perfil Big Five x Perfil Ideal")
+            st.markdown("### 🎯 Perfil Big Five — Interpretação")
+
+            def interpretar_traco(nome, valor):
+                valor = float(valor or 0)
+
+                if nome == "Neuroticismo":
+                    if valor > 60:
+                        return "nível alto → pode prejudicar resiliência e estabilidade emocional."
+                    elif valor > 45:
+                        return "nível moderado → atenção em ambientes de alta pressão."
+                    else:
+                        return "nível saudável → boa regulação emocional."
+
+                if valor >= 7:
+                    return "nível alto → força clara nesse traço."
+                elif valor >= 5:
+                    return "nível moderado → equilíbrio natural."
+                else:
+                    return "nível baixo → tendência menos marcada nesse aspecto."
+
+            for nome, valor in traits.items():
+                st.markdown(f"**• {nome} ({valor}/10):** {interpretar_traco(nome, valor)}")
+
+            st.markdown("### Gráficos")
             st.plotly_chart(radar_fig, use_container_width=True)
             st.plotly_chart(gauge_fig, use_container_width=True)
 
-            st.markdown("**Traços numéricos:**")
-            st.write(pd.DataFrame(
-                [{"Traço": k, "Valor (0–10)": v} for k, v in traits.items()]
-            ))
-
+        # ------------------------------------------------------------
         # 💼 COMPETÊNCIAS
+        # ------------------------------------------------------------
         with tab_comp:
-            st.markdown("#### Competências MS")
-            if comp_fig:
-                st.plotly_chart(comp_fig, use_container_width=True)
-            else:
-                st.info("Nenhuma competência estruturada foi identificada no laudo.")
+            st.markdown("### 💼 Competências — Leitura Geral")
+
             if competencias:
-                st.markdown("**Tabela de competências:**")
-                st.write(pd.DataFrame(competencias))
+                acima = [c for c in competencias if c.get("nota", 0) >= 55]
+                abaixo = [c for c in competencias if c.get("nota", 0) < 45]
 
+                if acima:
+                    st.markdown("#### 🔹 Pontos de Força")
+                    for c in acima[:5]:
+                        st.markdown(f"**• {c['nome']}** — desempenho consistente para o cargo.")
+
+                if abaixo:
+                    st.markdown("#### 🔸 Pontos Críticos")
+                    for c in abaixo[:5]:
+                        st.markdown(f"**• {c['nome']}** — requer acompanhamento e plano de desenvolvimento.")
+
+                st.markdown("### Gráfico de Competências")
+                if comp_fig:
+                    st.plotly_chart(comp_fig, use_container_width=True)
+                else:
+                    st.info("Nenhuma competência identificada de forma estruturada.")
+            else:
+                st.info("Nenhuma competência identificada de forma estruturada no laudo.")
+
+        # ------------------------------------------------------------
         # 🧘 SAÚDE EMOCIONAL
+        # ------------------------------------------------------------
         with tab_saude:
-            st.markdown("#### Saúde Emocional e Resiliência")
-            saude_txt = analysis.get("saude_emocional_contexto", "")
-            if saude_txt:
-                st.write(saude_txt)
-            indicadores = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
-            if indicadores:
-                st.markdown("**Indicadores numéricos:**")
-                st.write(pd.DataFrame(
-                    [{"Indicador": k, "Valor (0–100)": v} for k, v in indicadores.items()]
-                ))
+            st.markdown("### 🧘 Saúde Emocional — Justificativa Completa")
 
+            if indicadores:
+                for nome, valor in indicadores.items():
+                    n = float(valor or 0)
+                    if n >= 70:
+                        msg = "nível alto → pode indicar tensão emocional significativa."
+                    elif n >= 55:
+                        msg = "nível moderado → acompanhar em rotinas intensas."
+                    else:
+                        msg = "nível saudável, dentro do esperado."
+                    st.markdown(f"**• {nome.replace('_', ' ').capitalize()}: {n:.0f}/100 → {msg}**")
+            else:
+                st.info("O laudo não trouxe indicadores numéricos de saúde emocional de forma estruturada.")
+
+            st.markdown("### Contextualização da IA")
+            st.write(analysis.get("saude_emocional_contexto", ""))
+
+        # ------------------------------------------------------------
         # 📈 DESENVOLVIMENTO
+        # ------------------------------------------------------------
         with tab_dev:
-            st.markdown("#### Recomendações de Desenvolvimento")
+            st.markdown("### 📈 Recomendações de Desenvolvimento — Versão Ampliada")
+
             recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
             if recs:
                 for i, rec in enumerate(recs, 1):
-                    st.markdown(f"**{i}.** {rec}")
+                    st.markdown(f"**{i}. {rec}**")
             else:
-                st.info("Nenhuma recomendação específica foi registrada.")
+                st.info("O laudo não trouxe recomendações específicas de desenvolvimento.")
 
-            st.markdown("#### Cargos Alternativos Sugeridos")
+            st.markdown("### Sugestões Adicionais (Elder Brain)")
+            st.markdown(
+                """
+- **Treinamentos recomendados:** Inteligência Emocional, Comunicação Assertiva, Gestão de Conflitos.  
+- **Rotina sugerida:** feedback quinzenal estruturado com liderança e acompanhamento dos indicadores emocionais.  
+- **Foco de curto prazo:** trabalhar os pontos mais críticos de competências e qualquer traço ligado a resiliência.  
+"""
+            )
+
+            st.markdown("### Cargos Alternativos Sugeridos")
             cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
             if cargos_alt:
-                st.write(pd.DataFrame(cargos_alt))
+                for c in cargos_alt:
+                    st.markdown(f"• **{c.get('cargo', '')}** — {c.get('justificativa', '')}")
             else:
-                st.info("Não foram sugeridos cargos alternativos neste laudo.")
+                st.info("Nenhum cargo alternativo foi sugerido neste laudo.")
 
+        # ------------------------------------------------------------
         # 📄 DADOS BRUTOS
+        # ------------------------------------------------------------
         with tab_raw:
-            st.markdown("#### JSON bruto — BFA extraído")
+            st.markdown("### 📄 Dados Brutos — Para Auditoria")
             st.json(bfa_data)
-            st.markdown("#### JSON bruto — Análise comportamental")
             st.json(analysis)
 
         st.markdown("---")
 
-        # ---------- PDF ----------
+        # ===================== PDF — DOWNLOAD =====================
         st.subheader("Relatório em PDF")
         if pdf_bytes:
             pdf_buffer = io.BytesIO(pdf_bytes)
-            st.download_button(
-                label="📄 Baixar relatório corporativo (PDF)",
-                data=pdf_buffer.getvalue(),
-                file_name=pdf_filename,
-                mime="application/pdf",
-            )
         else:
             pdf_buffer = gerar_pdf_corporativo(
                 bfa_data=bfa_data,
@@ -496,16 +600,12 @@ def main():
                 save_path=None,
                 logo_path=None,
             )
-            st.download_button(
-                label="📄 Baixar relatório corporativo (PDF)",
-                data=pdf_buffer.getvalue(),
-                file_name=pdf_filename,
-                mime="application/pdf",
-            )
 
-        st.info(
-            "Os resultados permanecem na tela após o download. "
-            "Um e-mail único foi enviado com o PDF do relatório e a planilha de uso."
+        st.download_button(
+            label="📄 Baixar relatório corporativo (PDF)",
+            data=pdf_buffer.getvalue(),
+            file_name=pdf_filename,
+            mime="application/pdf",
         )
 
 
