@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -9,9 +8,6 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional, Tuple
-import io
-import pandas as pd
-
 
 import streamlit as st
 
@@ -22,24 +18,24 @@ from eba_config import (
     GPT_PRICE_OUTPUT_PER_1K,
 )
 
-
+# libs opcionais
 try:
     import tiktoken
 except Exception:
-    tiktoken = None  
+    tiktoken = None  # type: ignore
 
 try:
     from groq import Groq
 except Exception:
-    Groq = None  
+    Groq = None  # type: ignore
 
 try:
     from openai import OpenAI
 except Exception:
-    OpenAI = None  
+    OpenAI = None  # type: ignore
 
 
-
+# ======== Token Accounting ========
 @dataclass
 class TokenStep:
     prompt: int = 0
@@ -107,15 +103,12 @@ def _estimate_tokens(text: str) -> int:
 
 @st.cache_resource(show_spinner=False)
 def get_llm_client_cached(provider: str, api_key: str):
-   
+    """Cria cliente LLM (Groq/OpenAI) usando o client padrão do SDK."""
     if not api_key:
         raise RuntimeError("Chave da API não configurada. Defina nos Secrets do Streamlit.")
     pv = (provider or "Groq").lower()
 
-    
-    for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-        os.environ.pop(var, None)
-
+    # não mexemos mais em proxies via código; usamos o ambiente padrão da VPS
     if pv == "groq":
         if Groq is None:
             raise RuntimeError("SDK Groq não instalado.")
@@ -136,6 +129,7 @@ def get_llm_client_cached(provider: str, api_key: str):
 
     raise RuntimeError(f"Provedor não suportado: {provider}")
 
+
 def get_api_key_for_provider(provider: str) -> str:
     provider = (provider or "Groq").lower()
     if provider == "groq":
@@ -155,40 +149,35 @@ def send_admin_report_if_configured(
     tracker: TokenTracker,
     provider: str,
     model: str,
-    meta: Optional[Dict[str, Any]] = None,
 ) -> None:
-    meta = meta or {}
+    """
+    Envia por email o 'relatório admin' (tokens, custo, modelo, provider),
+    SE e somente se as variáveis de email estiverem configuradas em st.secrets.
+
+    Necessário em .streamlit/secrets.toml:
+      EMAIL_HOST
+      EMAIL_PORT (opcional, default 587)
+      EMAIL_USER
+      EMAIL_PASS
+      EMAIL_TO          -> e-mail principal (você)
+      EBA_FINANCE_TO    -> (opcional) cópia para financeiro
+    """
     try:
         host = st.secrets.get("EMAIL_HOST", "")
         user = st.secrets.get("EMAIL_USER", "")
         pwd = st.secrets.get("EMAIL_PASS", "")
         to = st.secrets.get("EMAIL_TO", "")
+        finance_to = st.secrets.get("EBA_FINANCE_TO", "")
         port = int(st.secrets.get("EMAIL_PORT", 587))
 
-      
         if not (host and user and pwd and to):
+            # se não estiver configurado, apenas não envia
             return
 
-     
         td = tracker.dict()
         total_tokens = tracker.total_tokens
         cost = tracker.cost_usd_gpt()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        cargo = meta.get("cargo", "")
-        email_emp = meta.get("email_empresarial", "")
-        nome_cand = meta.get("nome_candidato", "")
-
-    
-        def _step(name: str) -> Dict[str, int]:
-            return td.get(name, {"prompt": 0, "completion": 0, "total": 0})
-
-        extr = _step("extracao")
-        anal = _step("analise")
-        chat = _step("chat")
-        pdf_step = _step("pdf")
-
-       
         linhas = [
             "Elder Brain Analytics — Uso de Relatório",
             f"Data/Hora: {datetime.now():%d/%m/%Y %H:%M}",
@@ -197,108 +186,50 @@ def send_admin_report_if_configured(
             f"Modelo:   {model}",
             "",
             "Uso de tokens por etapa:",
-            f"- extracao: total={extr['total']} "
-            f"(prompt={extr['prompt']} / completion={extr['completion']})",
-            f"- analise: total={anal['total']} "
-            f"(prompt={anal['prompt']} / completion={anal['completion']})",
-            f"- chat: total={chat['total']} "
-            f"(prompt={chat['prompt']} / completion={chat['completion']})",
-            f"- pdf: total={pdf_step['total']} "
-            f"(prompt={pdf_step['prompt']} / completion={pdf_step['completion']})",
-            "",
-            f"Total de tokens: {total_tokens}",
-            f"Custo estimado (tabela GPT): ${cost:.4f}",
         ]
-
-        if cargo or email_emp or nome_cand:
-            linhas.append("")
-            linhas.append("Contexto do processamento:")
-            if nome_cand:
-                linhas.append(f"- Candidato: {nome_cand}")
-            if cargo:
-                linhas.append(f"- Cargo avaliado: {cargo}")
-            if email_emp:
-                linhas.append(f"- Email empresarial: {email_emp}")
+        for step, vals in td.items():
+            linhas.append(
+                f"- {step}: total={vals['total']} "
+                f"(prompt={vals['prompt']} / completion={vals['completion']})"
+            )
+        linhas.append("")
+        linhas.append(f"Total de tokens: {total_tokens}")
+        linhas.append(f"Custo estimado (tabela GPT): ${cost:.4f}")
 
         body = "\n".join(linhas)
 
-   
-        row = {
-           
-            "data_hora": now_str,
-            "provider": provider,
-            "model": model,
-            "cargo": cargo,
-            "email_empresarial": email_emp,
-            "nome_candidato": nome_cand,
-
-          
-            "extracao_prompt": extr["prompt"],
-            "extracao_completion": extr["completion"],
-            "extracao_total": extr["total"],
-
-        
-            "analise_prompt": anal["prompt"],
-            "analise_completion": anal["completion"],
-            "analise_total": anal["total"],
-
-          
-            "chat_prompt": chat["prompt"],
-            "chat_completion": chat["completion"],
-            "chat_total": chat["total"],
-
-          
-            "pdf_prompt": pdf_step["prompt"],
-            "pdf_completion": pdf_step["completion"],
-            "pdf_total": pdf_step["total"],
-
-          
-            "total_tokens": total_tokens,
-            "custo_usd": round(cost, 6),
-        }
-
-        df = pd.DataFrame([row])
-
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="uso_tokens")
-
-        output.seek(0)
-        excel_bytes = output.read()
-
-  
         msg = EmailMessage()
         msg["Subject"] = "[EBA] Relatório processado (uso de tokens)"
         msg["From"] = user
-        msg["To"] = to
+
+        # To principal + cópia para financeiro (se existir)
+        destinatarios = [to]
+        if finance_to:
+            destinatarios.append(finance_to)
+
+        msg["To"] = ", ".join(destinatarios)
         msg.set_content(body)
 
-       
-        msg.add_attachment(
-            excel_bytes,
-            maintype="application",
-            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"eba_uso_tokens_{datetime.now():%Y%m%d_%H%M}.xlsx",
-        )
-
-        # envio
         with smtplib.SMTP(host, port) as server:
             server.starttls()
             server.login(user, pwd)
             server.send_message(msg)
-
     except Exception as e:
-
+        # não quebra o app – só avisa se estiver na tela
         st.warning(f"Falha ao enviar email de log admin: {e}")
 
 
+# ======== PROMPTS ========
 EXTRACTION_PROMPT = """Você é um especialista em análise de relatórios BFA (Big Five Analysis) para seleção de talentos.
 Sua tarefa: extrair dados do relatório abaixo e retornar APENAS um JSON válido, sem texto adicional.
 
 ESTRUTURA OBRIGATÓRIA:
 {
-  "candidato": {"nome": "string ou null","cargo_avaliado": "string ou null"},
+  "candidato": {
+    "nome": "string ou null",
+    "cargo_avaliado": "string ou null",
+    "empresa": "string ou null"
+  },
   "traits_bfa": {
     "Abertura": número 0-10 ou null,
     "Conscienciosidade": número 0-10 ou null,
@@ -306,9 +237,26 @@ ESTRUTURA OBRIGATÓRIA:
     "Amabilidade": número 0-10 ou null,
     "Neuroticismo": número 0-10 ou null
   },
-  "competencias_ms": [{"nome": "string","nota": número,"classificacao": "string"}],
-  "facetas_relevantes": [{"nome": "string","percentil": número,"interpretacao": "string resumida"}],
-  "indicadores_saude_emocional": {"ansiedade": 0-100 ou null,"irritabilidade": 0-100 ou null,"estado_animo": 0-100 ou null,"impulsividade": 0-100 ou null},
+  "competencias_ms": [
+    {
+      "nome": "string",
+      "nota": número (0-100 se estiver em percentil, 0-10 se estiver em escala 0-10)",
+      "classificacao": "string"
+    }
+  ],
+  "facetas_relevantes": [
+    {
+      "nome": "string",
+      "percentil": número,
+      "interpretacao": "string resumida"
+    }
+  ],
+  "indicadores_saude_emocional": {
+    "ansiedade": 0-100 ou null,
+    "irritabilidade": 0-100 ou null,
+    "estado_animo": 0-100 ou null,
+    "impulsividade": 0-100 ou null
+  },
   "potencial_lideranca": "BAIXO" | "MÉDIO" | "ALTO" ou null,
   "integridade_fgi": 0-100 ou null,
   "resumo_qualitativo": "texto original do relatório",
@@ -317,20 +265,25 @@ ESTRUTURA OBRIGATÓRIA:
   "fit_geral_cargo": 0-100
 }
 
-REGRAS:
-1) Normalize percentis; 2) Big Five: percentil 60 -> 6.0/10;
-3) Use null quando não houver; 4) fit_geral_cargo 0-100 baseado no cargo: {cargo}.
+REGRAS GERAIS:
+1) Normalize percentis quando necessário. Quando o relatório trouxer percentis 0-100 para Big Five, converta para escala 0-10 (ex.: 60 -> 6.0).
+2) Big Five: use os nomes acima. Se o relatório usar variações (por ex. "Extroversão" com acento), mapeie para o campo correspondente.
+3) Use null quando a informação não existir.
+4) O campo fit_geral_cargo (0-100) deve ser um indicador bruto de adequação geral ao cargo baseado no conteúdo do laudo para o cargo: {cargo}.
+5) Quando possível, extraia também o nome da EMPRESA (cliente) do laudo e preencha em candidato.empresa. Se não houver, use null.
 
 RELATÓRIO:
 \"\"\"{text}\"\"\"
 
+
 MATERIAIS (opcional):
 \"\"\"{training_context}\"\"\"
+
 
 Retorne apenas o JSON puro.
 """
 
-ANALYSIS_PROMPT = """Você é um consultor sênior de RH especializado em análise comportamental.
+ANALYSIS_PROMPT = """Você é um consultor sênior de RH especializado em análise comportamental aplicada a seleção de talentos.
 
 Cargo avaliado: {cargo}
 
@@ -340,18 +293,73 @@ DADOS (JSON extraído):
 PERFIL IDEAL DO CARGO:
 {perfil_cargo}
 
-Responda em JSON:
+REGRAS PARA CÁLCULO DE FIT E INTERPRETAÇÃO (SIGA COM ATENÇÃO):
+
+1) BIG FIVE COMO BASE:
+   - Extroversão, Simpatia/Amabilidade e Inovação (normalmente ligada a Abertura) são as principais dimensões positivas para o FIT.
+     Quanto maiores esses indicadores (dentro da régua do laudo), maior tende a ser a compatibilidade.
+   - Neuroticismo: quanto MENOR, melhor. Este é um eixo crítico. Neuroticismo elevado deve REDUZIR fortemente a compatibilidade.
+
+2) RESILIÊNCIA E EMOÇÃO:
+   - Considere facetas/competências ligadas a Resiliência e Emoção (ou rótulos equivalentes).
+   - Ideal: IGUAL OU MENOR QUE 55 pontos na régua, quando a régua for 0-100.
+   - Quanto menor a pontuação em "Resiliência e Emoção" (quando esta representa vulnerabilidade emocional), melhor para o FIT.
+   - Se o relatório tratar Resiliência como algo positivo (maior = mais resiliente), interprete de forma coerente, mas respeitando a intenção:
+     aqui a regra é: altas vulnerabilidades emocionais reduzem o FIT.
+
+3) AUTOGESTÃO E DESEMPENHO:
+   - Competências de Autogestão e Desempenho (ou nomes muito próximos) são eixos positivos.
+   - Quanto MAIOR a nota, melhor.
+   - Notas baixas nesses eixos devem ser destacadas como ponto crítico.
+
+4) PRODUTIVIDADE E DINAMISMO:
+   - Competências ou indicadores com esses nomes (ou variações próximas) devem ser tratados como positivos.
+   - Quanto MAIOR a nota, melhor.
+
+5) COMPATIBILIDADE_GERAL (0-100):
+   - Deve ser calculada principalmente a partir de:
+       * Extroversão, Amabilidade/Simpatia, Inovação/Abertura (para cima)
+       * Neuroticismo (para baixo)
+       * Resiliência/Emoção conforme explicado acima
+       * Autogestão, Desempenho, Produtividade e Dinamismo (quanto maior, melhor)
+   - Use o perfil ideal do cargo como referência (perfil_cargo) para calibrar esse valor.
+   - 0-39 → compatibilidade baixa
+     40-69 → compatibilidade moderada
+     70-100 → compatibilidade alta
+
+6) DECISÃO:
+   - "RECOMENDADO" → compatibilidade_geral geralmente >= 70, sem riscos críticos inaceitáveis.
+   - "RECOMENDADO COM RESSALVAS" → compatibilidade_geral intermediária ou com pontos de atenção claros mas gerenciáveis.
+   - "NÃO RECOMENDADO" → compatibilidade_geral baixa ou riscos elevados (ex.: Neuroticismo muito alto, vulnerabilidade emocional grave, baixa Autogestão, etc.).
+
+Responda em JSON no formato abaixo (NÃO inclua comentários):
+
 {
   "compatibilidade_geral": 0-100,
   "decisao": "RECOMENDADO" | "RECOMENDADO COM RESSALVAS" | "NÃO RECOMENDADO",
   "justificativa_decisao": "texto",
   "analise_tracos": {
-    "Abertura": "texto","Conscienciosidade": "texto","Extroversao": "texto","Amabilidade": "texto","Neuroticismo": "texto"
+    "Abertura": "texto",
+    "Conscienciosidade": "texto",
+    "Extroversao": "texto",
+    "Amabilidade": "texto",
+    "Neuroticismo": "texto (reforçando que quanto menor, melhor)"
   },
-  "competencias_criticas": [{"competencia":"nome","avaliacao":"texto","status":"ATENDE" | "PARCIAL" | "NÃO ATENDE"}],
+  "competencias_criticas": [
+    {
+      "competencia": "nome",
+      "avaliacao": "texto",
+      "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"
+    }
+  ],
   "saude_emocional_contexto": "texto",
   "recomendacoes_desenvolvimento": ["a","b","c"],
-  "cargos_alternativos": [{"cargo":"nome","justificativa":"texto"}],
+  "cargos_alternativos": [
+    {
+      "cargo":"nome",
+      "justificativa":"texto"
+    }
+  ],
   "resumo_executivo": "100-150 palavras"
 }
 """
@@ -387,7 +395,7 @@ def _chat_completion_json(
             }
         return content, usage
 
-
+    # openai
     resp = client.chat.completions.create(
         model=model,
         messages=messages
@@ -422,6 +430,7 @@ def _estimate_and_add(
     tracker.add(step, _estimate_tokens(prompt_text), _estimate_tokens(content))
 
 
+# ======== CORE: extração / análise / chat ========
 def extract_bfa_data(
     text: str,
     cargo: str,
@@ -431,7 +440,7 @@ def extract_bfa_data(
     token: str,
     tracker: TokenTracker,
 ):
-
+    """Etapa 1: extração em JSON estruturado."""
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:
@@ -468,7 +477,7 @@ def analyze_bfa_data(
     token: str,
     tracker: TokenTracker,
 ):
-
+    """Etapa 2: análise de compatibilidade/fit."""
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:
@@ -515,7 +524,11 @@ def chat_with_elder_brain(
     token: str,
     tracker: TokenTracker,
 ) -> str:
-
+    """
+    Chat contextualizado com o relatório + análise.
+    OBS: a parte de UI de chat pode ser removida; esta função é mantida apenas
+    para eventual uso futuro ou debug.
+    """
     try:
         client = get_llm_client_cached(provider, token)
     except Exception as e:

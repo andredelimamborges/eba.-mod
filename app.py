@@ -1,379 +1,397 @@
-# app.py
 from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
+import pandas as pd
 import streamlit as st
+from email.message import EmailMessage
+import smtplib
 
 from eba_config import (
     APP_NAME,
-    APP_VERSION,
     APP_TAGLINE,
-    gerar_perfil_cargo_dinamico,
+    APP_VERSION,
 )
 from eba_llm import (
     TokenTracker,
     get_api_key_for_provider,
     extract_bfa_data,
     analyze_bfa_data,
-    chat_with_elder_brain,
     send_admin_report_if_configured,
-    send_pdf_report_email,
 )
-from eba_reports import gerar_pdf_corporativo
+from eba_reports import (
+    criar_radar_bfa,
+    criar_grafico_competencias,
+    criar_gauge_fit,
+    gerar_pdf_corporativo,
+)
+from eba_utils import (
+    ler_texto_de_arquivo,
+    load_all_training_texts,
+    save_training_snippet,
+)
+
+# =================== CONFIG BÁSICA ===================
+
+# travamos provider para GROQ no momento (UI não escolhe mais)
+LLM_PROVIDER = "Groq"
+LLM_MODEL_ID = "llama-3.1-70b-versatile"  # ajuste aqui se quiser outro modelo Groq
+
+st.set_page_config(
+    page_title=APP_NAME,
+    page_icon="🧠",
+    layout="wide",
+)
 
 
-# ========= EXTRAÇÃO DE TEXTO DE PDF =========
-try:
-    import pypdf  # biblioteca leve para leitura de PDF
-except Exception:
-    pypdf = None  # type: ignore
+# =================== HELPERS: E-MAIL / EXCEL ===================
+
+def _get_email_config() -> Optional[Dict[str, Any]]:
+    """Lê as configs de e-mail do secrets. Retorna None se incompleto."""
+    host = st.secrets.get("EMAIL_HOST", "")
+    port = int(st.secrets.get("EMAIL_PORT", 587))
+    user = st.secrets.get("EMAIL_USER", "")
+    pwd = st.secrets.get("EMAIL_PASS", "")
+    to_main = st.secrets.get("EMAIL_TO", "")
+    to_finance = st.secrets.get("EBA_FINANCE_TO", "")
+
+    if not (host and user and pwd and to_main):
+        return None
+
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "pwd": pwd,
+        "to_main": to_main,
+        "to_finance": to_finance,
+    }
 
 
-def extract_text_from_pdf(file) -> str:
-    """Extrai texto de um PDF usando pypdf, se disponível."""
-    if pypdf is None:
-        raise RuntimeError(
-            "Biblioteca 'pypdf' não está instalada. "
-            "Adicione 'pypdf' ao requirements.txt para habilitar extração de PDF."
-        )
-    reader = pypdf.PdfReader(file)
-    texts = []
-    for page in reader.pages:
-        try:
-            txt = page.extract_text() or ""
-        except Exception:
-            txt = ""
-        texts.append(txt)
-    return "\n\n".join(texts).strip()
+def send_usage_excel_if_configured(
+    tracker: TokenTracker,
+    provider: str,
+    model: str,
+    email_empresarial: str,
+    empresa: Optional[str],
+    cargo: str,
+) -> None:
+    """
+    Gera um Excel com o uso de tokens + metadados (empresa, e-mail empresarial, cargo)
+    e envia por e-mail para os endereços configurados.
+    """
+    cfg = _get_email_config()
+    if cfg is None:
+        return  # silencioso se não estiver configurado
 
+    td = tracker.dict()
 
-# ========= CONFIG BÁSICA =========
-DEFAULT_PROVIDER = "groq"
-DEFAULT_MODEL_ID = "llama-3.1-8b-instant"
+    def _step_vals(step: str) -> Dict[str, int]:
+        return td.get(step, {"prompt": 0, "completion": 0, "total": 0})
 
+    row = {
+        "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "email_empresarial": email_empresarial,
+        "empresa": empresa or "",
+        "cargo_avaliado": cargo,
+        "provider": provider,
+        "modelo": model,
+        # tokens por etapa
+        "extracao_prompt": _step_vals("extracao")["prompt"],
+        "extracao_completion": _step_vals("extracao")["completion"],
+        "extracao_total": _step_vals("extracao")["total"],
+        "analise_prompt": _step_vals("analise")["prompt"],
+        "analise_completion": _step_vals("analise")["completion"],
+        "analise_total": _step_vals("analise")["total"],
+        "chat_prompt": _step_vals("chat")["prompt"],
+        "chat_completion": _step_vals("chat")["completion"],
+        "chat_total": _step_vals("chat")["total"],
+        "pdf_prompt": _step_vals("pdf")["prompt"],
+        "pdf_completion": _step_vals("pdf")["completion"],
+        "pdf_total": _step_vals("pdf")["total"],
+        # totais
+        "total_prompt": tracker.total_prompt,
+        "total_completion": tracker.total_completion,
+        "total_tokens": tracker.total_tokens,
+        "custo_estimado_usd": round(tracker.cost_usd_gpt(), 4),
+    }
 
-def init_session_state() -> None:
-    if "email_empresarial" not in st.session_state:
-        st.session_state.email_empresarial = ""
-    if "bfa_data" not in st.session_state:
-        st.session_state.bfa_data = None
-    if "analysis" not in st.session_state:
-        st.session_state.analysis = None
-    if "pdf_buffer" not in st.session_state:
-        st.session_state.pdf_buffer = None
-    if "last_error" not in st.session_state:
-        st.session_state.last_error = ""
+    df = pd.DataFrame([row])
 
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="uso_eba")
+    buf.seek(0)
 
-# ========= UI AUXILIAR =========
-def render_header():
-    st.title(APP_NAME)
-    st.caption(f"{APP_TAGLINE} · v{APP_VERSION}")
+    filename = f"eba_uso_{datetime.now():%Y%m%d_%H%M}.xlsx"
 
+    msg = EmailMessage()
+    msg["Subject"] = "[EBA] Log de uso (planilha de tokens)"
+    msg["From"] = cfg["user"]
 
-def render_sidebar():
-    st.sidebar.markdown("### Sobre o Elder Brain Analytics")
-    st.sidebar.write(
-        "Ferramenta de apoio à decisão para **análise comportamental BFA** "
-        "e aderência a cargos, desenvolvida para uso corporativo."
+    destinatarios = [cfg["to_main"]]
+    if cfg["to_finance"]:
+        destinatarios.append(cfg["to_finance"])
+    msg["To"] = ", ".join(destinatarios)
+
+    corpo = (
+        "Segue em anexo a planilha de uso do Elder Brain Analytics.\n\n"
+        f"Data/Hora: {row['data_hora']}\n"
+        f"E-mail empresarial: {email_empresarial}\n"
+        f"Empresa: {empresa or 'não informado'}\n"
+        f"Cargo avaliado: {cargo}\n"
+        f"Total de tokens: {row['total_tokens']}\n"
+        f"Custo estimado (tabela GPT): ${row['custo_estimado_usd']:.4f}\n"
     )
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Versão:** " + APP_VERSION)
-    st.sidebar.markdown("**Módulo:** Relatórios BFA → PDF corporativo")
+    msg.set_content(corpo)
+
+    msg.add_attachment(
+        buf.getvalue(),
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )
+
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"]) as server:
+            server.starttls()
+            server.login(cfg["user"], cfg["pwd"])
+            server.send_message(msg)
+    except Exception as e:
+        # não quebra o app, só loga visualmente se estiver usando a UI
+        st.warning(f"Falha ao enviar e-mail com Excel de uso: {e}")
 
 
-def render_result_panel():
-    """Painel da direita com resumo do resultado e botão de download."""
-    bfa_data = st.session_state.bfa_data
-    analysis = st.session_state.analysis
-    pdf_buffer: Optional[io.BytesIO] = st.session_state.pdf_buffer
+# =================== UI PRINCIPAL ===================
 
-    if not analysis or not bfa_data:
-        st.info(
-            "📄 Após processar um laudo BFA, o resumo executivo e o botão de download "
-            "do relatório em PDF aparecerão aqui."
+def _header():
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"## 🧠 {APP_NAME}")
+        st.markdown(f"<span style='color:#777'>{APP_TAGLINE}</span>", unsafe_allow_html=True)
+    with col2:
+        st.markdown(
+            f"<div style='text-align:right;color:#999'>Versão {APP_VERSION}</div>",
+            unsafe_allow_html=True,
         )
-        return
+    st.markdown("---")
 
-    st.subheader("Resumo Executivo")
 
-    # métricas principais
-    col_a, col_b, col_c = st.columns(3)
-    compat = float(analysis.get("compatibilidade_geral", 0) or 0)
-    decisao = analysis.get("decisao", "N/A")
-    cargos_alt = analysis.get("cargos_alternativos", []) or []
+def main():
+    _header()
 
-    with col_a:
-        st.metric("Compatibilidade Geral", f"{compat:.0f}%")
-    with col_b:
-        st.metric("Decisão", decisao)
-    with col_c:
-        st.metric("Cargos alternativos sugeridos", len(cargos_alt))
+    # -------- Sidebar: e-mail empresarial obrigatório --------
+    with st.sidebar:
+        st.markdown("### Identificação do Analista")
+        email_empresarial = st.text_input(
+            "E-mail empresarial (obrigatório)",
+            value=st.session_state.get("email_empresarial", ""),
+            help="Utilizado para controle de uso e registro nos logs internos.",
+        )
+        if email_empresarial:
+            st.session_state["email_empresarial"] = email_empresarial
 
-    resumo_exec = analysis.get("resumo_executivo") or ""
-    if resumo_exec:
-        st.markdown("#### Síntese da Avaliação")
-        st.write(resumo_exec)
-
-    # recomendações
-    recs = analysis.get("recomendacoes_desenvolvimento", []) or []
-    if recs:
-        st.markdown("#### Recomendações de desenvolvimento")
-        for r in recs:
-            if r:
-                st.write(f"- {r}")
-
-    # botão de download do PDF
-    if pdf_buffer is not None:
         st.markdown("---")
-        candidato = (bfa_data or {}).get("candidato", {}) or {}
-        nome_cand = candidato.get("nome") or "candidato"
-        file_name = f"eba_relatorio_{nome_cand.replace(' ', '_')}.pdf"
+        st.markdown("### Arquivo / Laudo")
+        uploaded_file = st.file_uploader(
+            "Envie o laudo em PDF ou TXT",
+            type=["pdf", "txt"],
+        )
+
+    # -------- Corpo: formulário principal --------
+    st.markdown("### Dados do Laudo")
+
+    cargo = st.text_input(
+        "Cargo avaliado",
+        placeholder="Ex.: Engenheiro de Software Pleno",
+    )
+
+    texto_manual = st.text_area(
+        "Ou cole o texto do laudo (caso não envie arquivo)",
+        height=220,
+    )
+
+    col_btn1, col_btn2 = st.columns([1, 3])
+    with col_btn1:
+        processar = st.button("Gerar relatório corporativo", type="primary")
+
+    # espaço para mensagens de status
+    status_placeholder = st.empty()
+
+    if processar:
+        # validações básicas
+        if not email_empresarial.strip():
+            status_placeholder.error("Informe o **e-mail empresarial** para continuar.")
+            return
+
+        if not cargo.strip():
+            status_placeholder.error("Informe o **cargo avaliado** para continuar.")
+            return
+
+        # obter texto do laudo
+        if uploaded_file is not None:
+            laudo_texto = ler_texto_de_arquivo(uploaded_file)
+        else:
+            laudo_texto = texto_manual or ""
+
+        if not laudo_texto.strip():
+            status_placeholder.error("Envie um arquivo de laudo ou cole o texto no campo correspondente.")
+            return
+
+        status_placeholder.info("Processando laudo com o Elder Brain Analytics...")
+
+        # ---------- LLM / pipeline ----------
+        tracker = TokenTracker(provider=LLM_PROVIDER, model=LLM_MODEL_ID)
+        api_key = get_api_key_for_provider(LLM_PROVIDER)
+
+        # >>> treinamento em segundo plano: contexto histórico de laudos <<<
+        training_context = load_all_training_texts()
+
+        # 1) extração estruturada
+        bfa_data, raw_extraction = extract_bfa_data(
+            text=laudo_texto,
+            cargo=cargo,
+            training_context=training_context,
+            provider=LLM_PROVIDER,
+            model_id=LLM_MODEL_ID,
+            token=api_key,
+            tracker=tracker,
+        )
+        if bfa_data is None:
+            status_placeholder.error(f"Falha na etapa de extração: {raw_extraction}")
+            return
+
+        # 2) análise / fit
+        from eba_config import gerar_perfil_cargo_dinamico
+
+        perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
+        analysis, raw_analysis = analyze_bfa_data(
+            bfa_data=bfa_data,
+            cargo=cargo,
+            perfil_cargo=perfil_cargo,
+            provider=LLM_PROVIDER,
+            model_id=LLM_MODEL_ID,
+            token=api_key,
+            tracker=tracker,
+        )
+        if analysis is None:
+            status_placeholder.error(f"Falha na etapa de análise: {raw_analysis}")
+            return
+
+        status_placeholder.success("Relatório gerado com sucesso!")
+
+        # guardamos em sessão (se quiser reaproveitar)
+        st.session_state["bfa_data"] = bfa_data
+        st.session_state["analysis"] = analysis
+        st.session_state["cargo"] = cargo
+
+        # ---------- Empresa / nome do candidato ----------
+        candidato = bfa_data.get("candidato", {}) or {}
+        nome_candidato = candidato.get("nome") or "Não informado"
+        empresa = candidato.get("empresa") or ""
+
+        # >>> salva snippet para treinamento futuro <<<
+        save_training_snippet(
+            report_text=laudo_texto,
+            cargo=cargo,
+            empresa=empresa,
+        )
+
+        # ---------- UI de resultado ----------
+        st.markdown("## Resultado do Laudo")
+
+        col_a, col_b, col_c = st.columns(3)
+        compat = float(analysis.get("compatibilidade_geral", 0) or 0)
+        decisao = analysis.get("decisao", "N/A")
+
+        with col_a:
+            st.metric("Compatibilidade geral", f"{compat:.0f} %")
+        with col_b:
+            st.metric("Decisão", decisao)
+        with col_c:
+            st.metric(
+                "Neuroticismo (quanto menor, melhor)",
+                f"{(bfa_data.get('traits_bfa', {}) or {}).get('Neuroticismo', 'N/D')}",
+            )
+
+        st.markdown(
+            f"**Candidato:** {nome_candidato}  \n"
+            f"**Empresa (do laudo):** {empresa or 'não informado'}  \n"
+            f"**Cargo avaliado:** {cargo}"
+        )
+
+        st.markdown("---")
+
+        # ----- gráficos em tela -----
+        traits = (bfa_data or {}).get("traits_bfa", {}) or {}
+        competencias = (bfa_data or {}).get("competencias_ms", []) or []
+
+        radar_fig = criar_radar_bfa(traits, perfil_cargo.get("traits_ideais", {}))
+        comp_fig = criar_grafico_competencias(competencias)
+        gauge_fig = criar_gauge_fit(compat)
+
+        st.subheader("Visualizações")
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            st.plotly_chart(radar_fig, use_container_width=True)
+            st.caption(
+                "📌 **Big Five x Perfil Ideal** — observe especialmente Extroversão, Amabilidade e Inovação "
+                "(ligada à Abertura), além de Neuroticismo (quanto menor, melhor)."
+            )
+        with col_g2:
+            st.plotly_chart(gauge_fig, use_container_width=True)
+            st.caption(
+                "📌 **Fit para o cargo** — indicador global levando em conta Big Five, Resiliência/Emoção, "
+                "Autogestão, Desempenho, Produtividade e Dinamismo."
+            )
+
+        if comp_fig:
+            st.plotly_chart(comp_fig, use_container_width=True)
+            st.caption(
+                "📌 **Competências MS** — barras verdes indicam boa aderência; laranja e vermelho sinalizam "
+                "pontos de atenção para desenvolvimento ou risco para a função."
+            )
+
+        st.markdown("---")
+
+        # ----- Geração de PDF -----
+        st.subheader("Relatório em PDF")
+
+        pdf_buffer = gerar_pdf_corporativo(
+            bfa_data=bfa_data,
+            analysis=analysis,
+            cargo=cargo,
+            save_path=None,
+            logo_path=None,  # não usamos logo; eba_reports pode ignorar internamente
+        )
 
         st.download_button(
-            label="⬇️ Baixar relatório em PDF",
-            data=pdf_buffer,
-            file_name=file_name,
+            label="📄 Baixar relatório corporativo (PDF)",
+            data=pdf_buffer.getvalue(),
+            file_name=f"Relatorio_EBA_{nome_candidato}_{datetime.now():%Y%m%d}.pdf",
             mime="application/pdf",
-            use_container_width=True,
-        )
-    else:
-        st.warning(
-            "O relatório ainda não foi gerado em PDF nesta sessão. "
-            "Clique em **Processar relatório** novamente se necessário."
         )
 
+        # ----- Logs / e-mails -----
+        # 1) texto de admin (token usage consolidado)
+        send_admin_report_if_configured(tracker, LLM_PROVIDER, LLM_MODEL_ID)
 
-# ========= FLUXO PRINCIPAL =========
-def main():
-    st.set_page_config(
-        page_title=APP_NAME,
-        page_icon="🧠",
-        layout="wide",
-    )
-    init_session_state()
-
-    render_header()
-    render_sidebar()
-
-    col_left, col_right = st.columns([1.2, 1])
-
-    with col_left:
-        st.subheader("Entrada do Laudo BFA")
-
-        cargo = st.text_input(
-            "Cargo avaliado",
-            value="",
-            placeholder="Ex.: Engenheiro de Software Pleno",
-            help="Nome do cargo ou função que está sendo avaliada.",
+        # 2) Excel de uso com e-mail empresarial + empresa
+        send_usage_excel_if_configured(
+            tracker=tracker,
+            provider=LLM_PROVIDER,
+            model=LLM_MODEL_ID,
+            email_empresarial=email_empresarial,
+            empresa=empresa,
+            cargo=cargo,
         )
 
-        email_empresarial = st.text_input(
-            "Email empresarial *",
-            key="email_empresarial",
-            placeholder="nome.sobrenome@empresa.com",
-            help=(
-                "E-mail corporativo utilizado para registro de uso e envio automático do relatório. "
-                "Campo obrigatório."
-            ),
+        st.info(
+            "Uso do relatório registrado em planilha interna (Excel) e enviado para os "
+            "endereços configurados (incluindo financeiro, quando definido em `EBA_FINANCE_TO`)."
         )
-
-        st.markdown("##### Laudo BFA")
-        uploaded_pdf = st.file_uploader(
-            "Anexe o laudo BFA em PDF (opcional)",
-            type=["pdf"],
-            help="Se preferir, você também pode colar o laudo em texto logo abaixo.",
-        )
-        raw_text = st.text_area(
-            "Ou cole o laudo BFA em formato de texto",
-            value="",
-            height=260,
-        )
-
-        processar = st.button(
-            "⚙️ Processar relatório",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if processar:
-            # validações básicas
-            if not email_empresarial or "@" not in email_empresarial:
-                st.error("Informe um **e-mail empresarial válido** para continuar.")
-                return
-
-            if not cargo.strip():
-                st.error("Informe o **cargo avaliado** para continuar.")
-                return
-
-            texto_laudo = ""
-            if uploaded_pdf is not None:
-                try:
-                    texto_laudo = extract_text_from_pdf(uploaded_pdf)
-                except Exception as e:
-                    st.error(
-                        f"Não foi possível extrair o texto do PDF: {e}. "
-                        "Você pode colar o texto manualmente no campo abaixo."
-                    )
-                    return
-            elif raw_text.strip():
-                texto_laudo = raw_text.strip()
-            else:
-                st.error(
-                    "Anexe um PDF ou cole o laudo em texto para que o Elder Brain Analytics possa analisar."
-                )
-                return
-
-            if len(texto_laudo) < 500:
-                st.warning(
-                    "O laudo parece muito curto. Considere utilizar o relatório completo "
-                    "para obter uma análise mais robusta."
-                )
-
-            with st.spinner("Processando laudo com o Elder Brain Analytics..."):
-                provider = DEFAULT_PROVIDER
-                model_id = DEFAULT_MODEL_ID
-
-                # token da API (Groq ou outro) vem dos secrets
-                try:
-                    api_key = get_api_key_for_provider(provider)
-                except Exception as e:
-                    st.error(f"Erro ao obter chave da API: {e}")
-                    return
-
-                tracker = TokenTracker(model=model_id, provider=provider)
-
-                # contexto de treinamento → por enquanto vazio (rodando "em segundo plano" no futuro)
-                training_context = ""
-
-                # 1) Extração estruturada
-                bfa_data, extr_raw = extract_bfa_data(
-                    text=texto_laudo,
-                    cargo=cargo,
-                    training_context=training_context,
-                    provider=provider,
-                    model_id=model_id,
-                    token=api_key,
-                    tracker=tracker,
-                )
-                if bfa_data is None:
-                    st.error(
-                        "Falha na etapa de **extração dos dados BFA**. "
-                        f"Detalhes: {extr_raw}"
-                    )
-                    return
-
-                # 2) Geração de perfil ideal dinâmico + análise de fit
-                try:
-                    perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
-                except Exception:
-                    perfil_cargo = {}
-
-                analysis, anal_raw = analyze_bfa_data(
-                    bfa_data=bfa_data,
-                    cargo=cargo,
-                    perfil_cargo=perfil_cargo,
-                    provider=provider,
-                    model_id=model_id,
-                    token=api_key,
-                    tracker=tracker,
-                )
-                if analysis is None:
-                    st.error(
-                        "Falha na etapa de **análise de compatibilidade**. "
-                        f"Detalhes: {anal_raw}"
-                    )
-                    return
-
-                # guarda no session_state
-                st.session_state.bfa_data = bfa_data
-                st.session_state.analysis = analysis
-
-                # 3) Geração do PDF corporativo
-                try:
-                    pdf_buffer = gerar_pdf_corporativo(
-                        bfa_data=bfa_data,
-                        analysis=analysis,
-                        cargo=cargo,
-                        logo_path=None,  # se tiver logo, coloque o caminho aqui
-                    )
-                    st.session_state.pdf_buffer = pdf_buffer
-                except Exception as e:
-                    st.session_state.pdf_buffer = None
-                    st.error(f"Erro ao gerar o PDF corporativo: {e}")
-                    return
-
-                # 4) Envio de log técnico (Excel) para o administrador
-                candidato = (bfa_data or {}).get("candidato", {}) or {}
-                nome_candidato = candidato.get("nome", "")
-
-                send_admin_report_if_configured(
-                    tracker=tracker,
-                    provider=provider,
-                    model=model_id,
-                    meta={
-                        "cargo": cargo,
-                        "email_empresarial": email_empresarial,
-                        "nome_candidato": nome_candidato,
-                    },
-                )
-
-                # 5) Envio automático do PDF por e-mail (cofre + analista)
-                try:
-                    pdf_bytes = pdf_buffer.getvalue()
-                except Exception:
-                    pdf_bytes = None
-
-                if pdf_bytes:
-                    send_pdf_report_email(
-                        pdf_bytes=pdf_bytes,
-                        meta={
-                            "cargo": cargo,
-                            "email_empresarial": email_empresarial,
-                            "nome_candidato": nome_candidato,
-                        },
-                    )
-
-                st.success("Relatório processado com sucesso! 🎯")
-
-    with col_right:
-        render_result_panel()
-
-        # opcional: espaço para dúvidas ao Elder Brain sobre o mesmo laudo
-        bfa_data = st.session_state.bfa_data
-        analysis = st.session_state.analysis
-        if bfa_data and analysis:
-            st.markdown("---")
-            st.markdown("#### Pergunte ao Elder Brain sobre este candidato")
-            question = st.text_input(
-                "Digite uma pergunta (opcional)",
-                placeholder="Ex.: Quais são os principais riscos deste perfil para uma função de liderança?",
-            )
-            if st.button("Perguntar", use_container_width=True):
-                provider = DEFAULT_PROVIDER
-                model_id = DEFAULT_MODEL_ID
-
-                try:
-                    api_key = get_api_key_for_provider(provider)
-                except Exception as e:
-                    st.error(f"Erro ao obter chave da API: {e}")
-                    return
-
-                tracker = TokenTracker(model=model_id, provider=provider)
-                answer = chat_with_elder_brain(
-                    question=question,
-                    bfa_data=bfa_data,
-                    analysis=analysis,
-                    cargo="",
-                    provider=provider,
-                    model_id=model_id,
-                    token=api_key,
-                    tracker=tracker,
-                )
-                st.write(answer)
 
 
 if __name__ == "__main__":
