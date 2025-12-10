@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import io
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -13,12 +13,11 @@ from fpdf import FPDF
 
 from eba_config import gerar_perfil_cargo_dinamico
 
+# =========================
+#   PALETA / CORES
+# =========================
 
-# =========================================================
-#  PALETA DE CORES PREMIUM ELEGANTE
-# =========================================================
-
-COLOR_PRIMARY = "#54428E"         # roxo corporativo premium
+COLOR_PRIMARY = "#54428E"         # roxo corporativo
 COLOR_ACCENT = "#2ECC71"          # verde positivo
 COLOR_WARNING = "#F39C12"
 COLOR_DANGER = "#E74C3C"
@@ -28,11 +27,14 @@ COLOR_IDEAL_MAX = "rgba(46, 213, 115, 0.35)"
 COLOR_IDEAL_MIN = "rgba(46, 213, 115, 0.15)"
 
 
-# =========================================================
-#  GRÁFICOS
-# =========================================================
+# =========================
+#   GRÁFICOS
+# =========================
 
-def criar_radar_bfa(traits: Dict[str, float], traits_ideais: Dict[str, Tuple[float, float]]):
+def criar_radar_bfa(
+    traits: Dict[str, float],
+    traits_ideais: Dict[str, Tuple[float, float]],
+) -> go.Figure:
     labels = [
         "Abertura",
         "Conscienciosidade",
@@ -51,32 +53,39 @@ def criar_radar_bfa(traits: Dict[str, float], traits_ideais: Dict[str, Tuple[flo
     vmax = [traits_ideais.get(k, (0, 10))[1] for k in labels]
     vmin = [traits_ideais.get(k, (0, 10))[0] for k in labels]
 
-    fig.add_trace(go.Scatterpolar(
-        r=vmax,
-        theta=labels,
-        fill="toself",
-        name="Faixa Ideal (Máx)",
-        line=dict(color=COLOR_ACCENT),
-        fillcolor=COLOR_IDEAL_MAX,
-    ))
+    # faixa ideal
+    fig.add_trace(
+        go.Scatterpolar(
+            r=vmax,
+            theta=labels,
+            fill="toself",
+            name="Faixa Ideal (Máx)",
+            line=dict(color=COLOR_ACCENT),
+            fillcolor=COLOR_IDEAL_MAX,
+        )
+    )
+    fig.add_trace(
+        go.Scatterpolar(
+            r=vmin,
+            theta=labels,
+            fill="tonext",
+            name="Faixa Ideal (Mín)",
+            line=dict(color=COLOR_ACCENT),
+            fillcolor=COLOR_IDEAL_MIN,
+        )
+    )
 
-    fig.add_trace(go.Scatterpolar(
-        r=vmin,
-        theta=labels,
-        fill="tonext",
-        name="Faixa Ideal (Mín)",
-        line=dict(color=COLOR_ACCENT),
-        fillcolor=COLOR_IDEAL_MIN,
-    ))
-
-    fig.add_trace(go.Scatterpolar(
-        r=vals,
-        theta=labels,
-        fill="toself",
-        name="Candidato",
-        line=dict(color=COLOR_RADAR, width=3),
-        fillcolor="rgba(96,81,155,0.4)",
-    ))
+    # candidato
+    fig.add_trace(
+        go.Scatterpolar(
+            r=vals,
+            theta=labels,
+            fill="toself",
+            name="Candidato",
+            line=dict(color=COLOR_RADAR, width=3),
+            fillcolor="rgba(96,81,155,0.4)",
+        )
+    )
 
     fig.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 10])),
@@ -87,7 +96,9 @@ def criar_radar_bfa(traits: Dict[str, float], traits_ideais: Dict[str, Tuple[flo
     return fig
 
 
-def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[go.Figure]:
+def criar_grafico_competencias(
+    competencias: List[Dict[str, Any]]
+) -> Optional[go.Figure]:
     if not competencias:
         return None
 
@@ -106,14 +117,16 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         else:
             cores.append(COLOR_ACCENT)
 
-    fig = go.Figure(go.Bar(
-        x=df["nota"],
-        y=df["nome"],
-        orientation="h",
-        marker=dict(color=cores),
-        text=df["nota"].round(0).astype(int),
-        textposition="outside",
-    ))
+    fig = go.Figure(
+        go.Bar(
+            x=df["nota"],
+            y=df["nome"],
+            orientation="h",
+            marker=dict(color=cores),
+            text=df["nota"].round(0).astype(int),
+            textposition="outside",
+        )
+    )
 
     fig.update_layout(
         title="Top 15 Competências (MS)",
@@ -125,42 +138,107 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
 
 
 def criar_gauge_fit(fit_score: float) -> go.Figure:
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=float(fit_score or 0),
-        domain={"x": [0, 1], "y": [0, 1]},
-        title={"text": "Fit para o Cargo"},
-        gauge={
-            "axis": {"range": [None, 100]},
-            "bar": {"color": COLOR_PRIMARY},
-            "steps": [
-                {"range": [0, 40], "color": COLOR_DANGER},
-                {"range": [40, 70], "color": COLOR_WARNING},
-                {"range": [70, 100], "color": COLOR_ACCENT},
-            ],
-        },
-    ))
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=float(fit_score or 0),
+            domain={"x": [0, 1], "y": [0, 1]},
+            title={"text": "Fit para o Cargo"},
+            gauge={
+                "axis": {"range": [None, 100]},
+                "bar": {"color": COLOR_PRIMARY},
+                "steps": [
+                    {"range": [0, 40], "color": COLOR_DANGER},
+                    {"range": [40, 70], "color": COLOR_WARNING},
+                    {"range": [70, 100], "color": COLOR_ACCENT},
+                ],
+            },
+        )
+    )
     fig.update_layout(height=420)
     return fig
 
 
-# =========================================================
-#  FIG → PNG
-# =========================================================
-
-def fig_to_png_path(fig, width=1400, height=900, scale=2):
+def fig_to_png_path(
+    fig: "go.Figure", width: int = 1400, height: int = 900, scale: int = 2
+) -> Optional[str]:
     try:
         import plotly.io as pio
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            pio.write_image(fig, tmp.name, format="png", width=width, height=height, scale=scale)
+            pio.write_image(
+                fig, tmp.name, format="png", width=width, height=height, scale=scale
+            )
             return tmp.name
     except Exception:
         return None
 
 
-# =========================================================
-#  PDF PREMIUM
-# =========================================================
+# =========================
+#   RESUMOS DOS GRÁFICOS
+# =========================
+
+def resumo_radar(traits: Dict[str, float]) -> str:
+    neuro = float(traits.get("Neuroticismo", 0) or 0)
+    ext = float(traits.get("Extroversão", 0) or 0)
+
+    msgs = []
+    if neuro > 60:
+        msgs.append("• Neuroticismo elevado → pode prejudicar resiliência emocional.")
+    elif neuro > 45:
+        msgs.append("• Neuroticismo moderado → atenção em contextos de alta pressão.")
+    else:
+        msgs.append("• Neuroticismo em faixa saudável → boa estabilidade emocional.")
+
+    if ext < 40:
+        msgs.append(
+            "• Extroversão baixa → estilo mais reservado, prefere interações mais focadas."
+        )
+    elif ext > 60:
+        msgs.append(
+            "• Extroversão alta → perfil mais ativo em contato com pessoas e ambientes dinâmicos."
+        )
+    else:
+        msgs.append(
+            "• Extroversão moderada → alternância entre momentos de exposição e foco interno."
+        )
+    return "\n".join(msgs)
+
+
+def resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
+    if not competencias:
+        return "Nenhuma competência foi identificada de forma estruturada no laudo."
+
+    acima = sum(1 for c in competencias if c.get("nota", 0) >= 55)
+    abaixo = sum(1 for c in competencias if c.get("nota", 0) < 45)
+    return (
+        f"• {acima} competências acima da linha verde (forças consolidadas).\n"
+        f"• {abaixo} competências abaixo da linha vermelha (pontos críticos de atenção)."
+    )
+
+
+def resumo_fit(fit: float) -> str:
+    fit = float(fit or 0)
+    if fit >= 80:
+        return (
+            "Fit muito alto: forte aderência ao cargo, com riscos comportamentais "
+            "relativamente controlados."
+        )
+    elif fit >= 60:
+        return (
+            "Fit moderado: alinhamento geral bom, mas com pontos específicos que "
+            "exigem plano de desenvolvimento."
+        )
+    else:
+        return (
+            "Fit baixo: desalinhamento relevante entre o perfil atual e as demandas "
+            "do cargo — uso recomendado com maior cautela."
+        )
+
+
+# =========================
+#   PDF PREMIUM
+# =========================
 
 class PDFReport(FPDF):
     def __init__(self):
@@ -168,12 +246,11 @@ class PDFReport(FPDF):
         self.set_auto_page_break(auto=True, margin=15)
         self.set_margins(15, 15, 15)
         self._family = "Helvetica"
-        self._unicode = False
 
+    # rodapé fixo em todas as páginas (menos capa se quiser, mas aqui deixei em todas)
     def footer(self):
-        if self.page_no() == 1:
-            return
-        self.set_y(-15)
+        # deixa uma linha de respiro antes
+        self.set_y(-20)
         self.set_font(self._family, "I", 8)
         self.set_text_color(120, 120, 120)
         txt = (
@@ -202,11 +279,17 @@ class PDFReport(FPDF):
         rep = {
             "\u2014": "-",
             "\u2013": "-",
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2026": "...",
             "\u00a0": " ",
         }
         for k, v in rep.items():
             s = s.replace(k, v)
 
+        # quebra palavras gigantes sem espaço
         s = re.sub(
             r"\S{60,}",
             lambda m: " ".join(
@@ -223,6 +306,7 @@ class PDFReport(FPDF):
 
 def pdf_cover(pdf: PDFReport, titulo: str, subtitulo: str):
     pdf.add_page()
+    # faixa no topo
     pdf.set_fill_color(84, 66, 142)
     pdf.rect(0, 0, pdf.w, 30, "F")
 
@@ -245,59 +329,19 @@ def pdf_cover(pdf: PDFReport, titulo: str, subtitulo: str):
         ln=1,
         align="C",
     )
+    pdf.set_text_color(0, 0, 0)
 
 
-# =========================================================
-#  RESUMOS DOS GRÁFICOS
-# =========================================================
-
-def resumo_radar(traits: Dict[str, float]) -> str:
-    neuro = float(traits.get("Neuroticismo", 0) or 0)
-    ext = float(traits.get("Extroversão", 0) or 0)
-
-    msgs = []
-    if neuro > 60:
-        msgs.append("• Neuroticismo elevado → pode prejudicar resiliência emocional.")
-    else:
-        msgs.append("• Neuroticismo dentro da faixa → boa estabilidade emocional.")
-    if ext < 40:
-        msgs.append("• Extroversão baixa → estilo mais reservado, atenção a funções de contato intenso.")
-    else:
-        msgs.append("• Extroversão adequada ao perfil esperado para cargos de interação.")
-    return "\n".join(msgs)
-
-
-def resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
-    if not competencias:
-        return "Nenhuma competência foi identificada de forma estruturada no laudo."
-    acima = sum(1 for c in competencias if c.get("nota", 0) >= 55)
-    abaixo = sum(1 for c in competencias if c.get("nota", 0) < 45)
-    return (
-        f"• {acima} competências acima da linha verde (forças consolidadas).  \n"
-        f"• {abaixo} competências abaixo da linha vermelha (pontos críticos de atenção)."
-    )
-
-
-def resumo_fit(fit: float) -> str:
-    fit = float(fit or 0)
-    if fit >= 80:
-        return "Fit muito alto: forte aderência ao cargo, com riscos comportamentais controlados."
-    elif fit >= 60:
-        return "Fit moderado: aderência geral boa, porém com pontos específicos para desenvolvimento."
-    else:
-        return "Fit baixo: desalinhamento relevante entre o perfil atual e as demandas do cargo."
-
-
-# =========================================================
-#  GERAÇÃO DO PDF COMPLETO
-# =========================================================
+# =========================
+#   GERAÇÃO DO PDF
+# =========================
 
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
     cargo: str,
     save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,
+    logo_path: Optional[str] = None,  # mantido só para compatibilidade de assinatura
 ) -> io.BytesIO:
     pdf = PDFReport()
 
@@ -308,9 +352,11 @@ def gerar_pdf_corporativo(
     pdf.heading(1, "Informações do Candidato")
     cand = bfa_data.get("candidato", {}) or {}
     pdf.paragraph(
-        f"Nome: {cand.get('nome', 'Não informado')}\n"
-        f"Empresa (extraída do laudo): {cand.get('empresa', 'Não informado')}\n"
-        f"Cargo avaliado: {cargo}"
+        "Nome: "
+        + (cand.get("nome", "Não informado") or "Não informado")
+        + "\nEmpresa (extraída do laudo): "
+        + (cand.get("empresa", "Não informado") or "Não informado")
+        + f"\nCargo avaliado: {cargo}"
     )
 
     # 2. DECISÃO E COMPATIBILIDADE
@@ -323,20 +369,31 @@ def gerar_pdf_corporativo(
 
     # 3. RESUMO EXECUTIVO
     pdf.heading(3, "Resumo Executivo")
-    pdf.paragraph(analysis.get("resumo_executivo", ""))
+    resumo_exec = analysis.get("resumo_executivo", "")
+    if resumo_exec:
+        pdf.paragraph(resumo_exec)
+    else:
+        pdf.paragraph(
+            "O laudo não trouxe um resumo executivo estruturado. "
+            "Recomenda-se leitura integral das seções de traços, competências e saúde emocional."
+        )
 
-    # 4. TRAÇOS BIG FIVE
+    # 4. TRAÇOS DE PERSONALIDADE (BIG FIVE)
     pdf.heading(4, "Traços de Personalidade (Big Five)")
     traits = bfa_data.get("traits_bfa", {}) or {}
     for nome, valor in traits.items():
-        pdf.paragraph(f"{nome}: {valor}")
+        pdf.paragraph(f"{nome}: {valor}/10")
     pdf.paragraph("Leitura sintética:\n" + resumo_radar(traits))
 
-    # 5. VISUALIZAÇÕES (SEM QUEBRA FORÇADA DE PÁGINA)
-    pdf.ln(3)
+    # >>> AQUI VEM O AJUSTE DE ESPAÇAMENTO <<<
+    # se estiver muito perto do fim da página, começa a seção 5 em uma nova página,
+    # para não ficar com título solto nem blocos de espaço em branco
+    if pdf.get_y() > 200:
+        pdf.add_page()
+
+    # 5. VISUALIZAÇÕES (GRÁFICOS)
     pdf.heading(5, "Visualizações (Gráficos)")
 
-    # perfil ideal dinâmico
     perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
     traits_ideais = perfil_cargo.get("traits_ideais", {}) or {}
 
@@ -345,7 +402,10 @@ def gerar_pdf_corporativo(
     path = fig_to_png_path(radar)
     if path:
         pdf.image(path, w=180)
-        os.remove(path)
+        try:
+            os.remove(path)
+        except Exception:
+            pass
     pdf.paragraph("Resumo do radar Big Five:\n" + resumo_radar(traits))
 
     # Gauge de fit
@@ -353,7 +413,10 @@ def gerar_pdf_corporativo(
     path = fig_to_png_path(gauge)
     if path:
         pdf.image(path, w=120)
-        os.remove(path)
+        try:
+            os.remove(path)
+        except Exception:
+            pass
     pdf.paragraph("Resumo do fit:\n" + resumo_fit(compat))
 
     # Competências
@@ -363,8 +426,13 @@ def gerar_pdf_corporativo(
         path = fig_to_png_path(comp_fig)
         if path:
             pdf.image(path, w=180)
-            os.remove(path)
+            try:
+                os.remove(path)
+            except Exception:
+                pass
         pdf.paragraph("Leitura das competências:\n" + resumo_competencias(competencias))
+    else:
+        pdf.paragraph("Não foi possível gerar gráfico de competências estruturadas.")
 
     # SAÍDA
     out = pdf.output(dest="S")
