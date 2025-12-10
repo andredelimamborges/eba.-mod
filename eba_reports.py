@@ -184,23 +184,23 @@ def resumo_radar(traits: Dict[str, float]) -> str:
 
     msgs = []
     if neuro > 60:
-        msgs.append("• Neuroticismo elevado → pode prejudicar resiliência emocional.")
+        msgs.append("- Neuroticismo elevado → pode prejudicar resiliência emocional.")
     elif neuro > 45:
-        msgs.append("• Neuroticismo moderado → atenção em contextos de alta pressão.")
+        msgs.append("- Neuroticismo moderado → atenção em contextos de alta pressão.")
     else:
-        msgs.append("• Neuroticismo em faixa saudável → boa estabilidade emocional.")
+        msgs.append("- Neuroticismo em faixa saudável → boa estabilidade emocional.")
 
     if ext < 40:
         msgs.append(
-            "• Extroversão baixa → estilo mais reservado, prefere interações mais focadas."
+            "- Extroversão baixa → estilo mais reservado, com preferência por interações mais focadas."
         )
     elif ext > 60:
         msgs.append(
-            "• Extroversão alta → perfil mais ativo em contato com pessoas e ambientes dinâmicos."
+            "- Extroversão alta → perfil mais ativo em contato com pessoas e ambientes dinâmicos."
         )
     else:
         msgs.append(
-            "• Extroversão moderada → alternância entre momentos de exposição e foco interno."
+            "- Extroversão moderada → alternância entre momentos de exposição e foco interno."
         )
     return "\n".join(msgs)
 
@@ -212,8 +212,8 @@ def resumo_competencias(competencias: List[Dict[str, Any]]) -> str:
     acima = sum(1 for c in competencias if c.get("nota", 0) >= 55)
     abaixo = sum(1 for c in competencias if c.get("nota", 0) < 45)
     return (
-        f"• {acima} competências acima da linha verde (forças consolidadas).\n"
-        f"• {abaixo} competências abaixo da linha vermelha (pontos críticos de atenção)."
+        f"- {acima} competências acima da linha verde (forças consolidadas).\n"
+        f"- {abaixo} competências abaixo da linha vermelha (pontos críticos de atenção)."
     )
 
 
@@ -247,9 +247,8 @@ class PDFReport(FPDF):
         self.set_margins(15, 15, 15)
         self._family = "Helvetica"
 
-    # rodapé fixo em todas as páginas (menos capa se quiser, mas aqui deixei em todas)
     def footer(self):
-        # deixa uma linha de respiro antes
+        # rodapé sempre no final da página
         self.set_y(-20)
         self.set_font(self._family, "I", 8)
         self.set_text_color(120, 120, 120)
@@ -257,13 +256,15 @@ class PDFReport(FPDF):
             "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas. "
             "O Elden Brain trabalha como um braço direito — lembre-se disto."
         )
-        self.multi_cell(0, 4, txt, align="C")
+        cleaned = self._clean_text(txt)
+        self.multi_cell(0, 4, cleaned, align="C")
 
     def heading(self, number: int, title: str):
         self.set_font(self._family, "B", 13)
         self.set_text_color(255, 255, 255)
         self.set_fill_color(84, 66, 142)
-        self.cell(0, 10, f"{number}. {title}", ln=1, fill=True)
+        text = self._clean_text(f"{number}. {title}")
+        self.cell(0, 10, text, ln=1, fill=True)
         self.set_text_color(0, 0, 0)
         self.ln(2)
 
@@ -277,14 +278,15 @@ class PDFReport(FPDF):
         if not s:
             return ""
         rep = {
-            "\u2014": "-",
-            "\u2013": "-",
+            "\u2014": "-",   # em dash
+            "\u2013": "-",   # en dash
             "\u2018": "'",
             "\u2019": "'",
             "\u201c": '"',
             "\u201d": '"',
             "\u2026": "...",
             "\u00a0": " ",
+            "•": "-",        # bullet para hífen
         }
         for k, v in rep.items():
             s = s.replace(k, v)
@@ -313,22 +315,19 @@ def pdf_cover(pdf: PDFReport, titulo: str, subtitulo: str):
     pdf.ln(45)
     pdf.set_font(pdf._family, "B", 26)
     pdf.set_text_color(84, 66, 142)
-    pdf.cell(0, 12, titulo, ln=1, align="C")
+    titulo_clean = pdf._clean_text(titulo)
+    pdf.cell(0, 12, titulo_clean, ln=1, align="C")
 
     pdf.set_font(pdf._family, "", 13)
     pdf.set_text_color(80, 80, 80)
-    pdf.cell(0, 8, subtitulo, ln=1, align="C")
+    subtitulo_clean = pdf._clean_text(subtitulo)
+    pdf.cell(0, 8, subtitulo_clean, ln=1, align="C")
 
     pdf.ln(10)
     pdf.set_font(pdf._family, "", 9)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(
-        0,
-        6,
-        f"Gerado em {datetime.now():%d/%m/%Y %H:%M} | Versão Premium",
-        ln=1,
-        align="C",
-    )
+    info = f"Gerado em {datetime.now():%d/%m/%Y %H:%M} | Versão Premium"
+    pdf.cell(0, 6, pdf._clean_text(info), ln=1, align="C")
     pdf.set_text_color(0, 0, 0)
 
 
@@ -341,23 +340,28 @@ def gerar_pdf_corporativo(
     analysis: Dict[str, Any],
     cargo: str,
     save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,  # mantido só para compatibilidade de assinatura
+    logo_path: Optional[str] = None,  # mantido só p/ compatibilidade
 ) -> io.BytesIO:
     pdf = PDFReport()
 
     # CAPA
-    pdf_cover(pdf, "Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
+    pdf_cover(pdf, "Relatório Corporativo", f"Elder Brain Analytics - {cargo}")
 
     # 1. INFORMAÇÕES DO CANDIDATO
     pdf.heading(1, "Informações do Candidato")
     cand = bfa_data.get("candidato", {}) or {}
-    pdf.paragraph(
-        "Nome: "
-        + (cand.get("nome", "Não informado") or "Não informado")
-        + "\nEmpresa (extraída do laudo): "
-        + (cand.get("empresa", "Não informado") or "Não informado")
-        + f"\nCargo avaliado: {cargo}"
+    nome = cand.get("nome", "Não informado") or "Não informado"
+
+    # limpa a empresa: remove qualquer trecho entre parênteses
+    empresa_raw = cand.get("empresa", "Não informado") or "Não informado"
+    empresa = re.sub(r"\s*\([^)]*\)", "", empresa_raw).strip() or "Não informado"
+
+    info_text = (
+        f"Nome: {nome}\n"
+        f"Empresa (extraída do laudo): {empresa}\n"
+        f"Cargo avaliado: {cargo}"
     )
+    pdf.paragraph(info_text)
 
     # 2. DECISÃO E COMPATIBILIDADE
     pdf.heading(2, "Decisão e Compatibilidade")
@@ -381,13 +385,11 @@ def gerar_pdf_corporativo(
     # 4. TRAÇOS DE PERSONALIDADE (BIG FIVE)
     pdf.heading(4, "Traços de Personalidade (Big Five)")
     traits = bfa_data.get("traits_bfa", {}) or {}
-    for nome, valor in traits.items():
-        pdf.paragraph(f"{nome}: {valor}/10")
+    for nome_traco, valor in traits.items():
+        pdf.paragraph(f"{nome_traco}: {valor}/10")
     pdf.paragraph("Leitura sintética:\n" + resumo_radar(traits))
 
-    # >>> AQUI VEM O AJUSTE DE ESPAÇAMENTO <<<
-    # se estiver muito perto do fim da página, começa a seção 5 em uma nova página,
-    # para não ficar com título solto nem blocos de espaço em branco
+    # ajuste de página para não "quebrar" a seção 5
     if pdf.get_y() > 200:
         pdf.add_page()
 
@@ -434,7 +436,7 @@ def gerar_pdf_corporativo(
     else:
         pdf.paragraph("Não foi possível gerar gráfico de competências estruturadas.")
 
-    # SAÍDA
+    # saída
     out = pdf.output(dest="S")
     if isinstance(out, str):
         out = out.encode("latin-1", "replace")
