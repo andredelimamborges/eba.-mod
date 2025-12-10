@@ -37,7 +37,7 @@ from eba_utils import (
 
 # travamos provider para GROQ no momento (UI não escolhe mais)
 LLM_PROVIDER = "Groq"
-LLM_MODEL_ID = "llama-3.1-70b-versatile"  # ajuste aqui se quiser outro modelo Groq
+LLM_MODEL_ID = "openai/gpt-oss-120b"  # ajuste aqui se quiser outro modelo Groq
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -208,10 +208,6 @@ def main():
         placeholder="Ex.: Engenheiro de Software Pleno",
     )
 
-    texto_manual = st.text_area(
-        "Ou cole o texto do laudo (caso não envie arquivo)",
-        height=220,
-    )
 
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
@@ -221,24 +217,6 @@ def main():
     status_placeholder = st.empty()
 
     if processar:
-        # validações básicas
-        if not email_empresarial.strip():
-            status_placeholder.error("Informe o **e-mail empresarial** para continuar.")
-            return
-
-        if not cargo.strip():
-            status_placeholder.error("Informe o **cargo avaliado** para continuar.")
-            return
-
-        # obter texto do laudo
-        if uploaded_file is not None:
-            laudo_texto = ler_texto_de_arquivo(uploaded_file)
-        else:
-            laudo_texto = texto_manual or ""
-
-        if not laudo_texto.strip():
-            status_placeholder.error("Envie um arquivo de laudo ou cole o texto no campo correspondente.")
-            return
 
         status_placeholder.info("Processando laudo com o Elder Brain Analytics...")
 
