@@ -77,11 +77,14 @@ def send_usage_excel_if_configured(
     empresa: Optional[str],
     cargo: str,
 ) -> None:
-    """Gera um Excel com o uso de tokens + metadados e envia por e-mail."""
+    """Gera uma planilha com o uso de tokens + metadados e envia por e-mail.
+
+    Tenta gerar XLSX (xlsxwriter). Se não conseguir, cai para CSV.
+    """
 
     cfg = _get_email_config()
     if cfg is None:
-        return  # silencioso
+        return  # silencioso se não houver config de e-mail
 
     td = tracker.dict()
 
@@ -111,12 +114,29 @@ def send_usage_excel_if_configured(
 
     df = pd.DataFrame([row])
 
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="uso_eba")
-    buf.seek(0)
+    # tenta XLSX, se falhar cai pra CSV
+    anex_bytes: bytes
+    filename: str
+    maintype: str
+    subtype: str
 
-    filename = f"eba_uso_{datetime.now():%Y%m%d_%H%M}.xlsx"
+    try:
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="uso_eba")
+        buf.seek(0)
+        anex_bytes = buf.getvalue()
+        filename = f"eba_uso_{datetime.now():%Y%m%d_%H%M}.xlsx"
+        maintype = "application"
+        subtype = "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    except Exception:
+        # fallback CSV
+        csv_buf = io.StringIO()
+        df.to_csv(csv_buf, index=False)
+        anex_bytes = csv_buf.getvalue().encode("utf-8")
+        filename = f"eba_uso_{datetime.now():%Y%m%d_%H%M}.csv"
+        maintype = "text"
+        subtype = "csv"
 
     msg = EmailMessage()
     msg["Subject"] = "[EBA] Log de uso (planilha de tokens)"
@@ -125,7 +145,6 @@ def send_usage_excel_if_configured(
     destinatarios = [cfg["to_main"]]
     if cfg["to_finance"]:
         destinatarios.append(cfg["to_finance"])
-
     msg["To"] = ", ".join(destinatarios)
 
     corpo = (
@@ -140,9 +159,9 @@ def send_usage_excel_if_configured(
     msg.set_content(corpo)
 
     msg.add_attachment(
-        buf.getvalue(),
-        maintype="application",
-        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        anex_bytes,
+        maintype=maintype,
+        subtype=subtype,
         filename=filename,
     )
 
@@ -152,8 +171,7 @@ def send_usage_excel_if_configured(
             server.login(cfg["user"], cfg["pwd"])
             server.send_message(msg)
     except Exception as e:
-        st.warning(f"Falha ao enviar planilha Excel: {e}")
-
+        st.warning(f"Falha ao enviar planilha (Excel/CSV): {e}")
 
 # =================== UI PRINCIPAL ===================
 

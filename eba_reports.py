@@ -464,6 +464,7 @@ def gerar_pdf_corporativo(
 ) -> io.BytesIO:
     """
     Gera o relatório PDF completo (versão premium corporativa).
+    Layout otimizado para reduzir espaços em branco.
     """
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
@@ -533,7 +534,6 @@ def gerar_pdf_corporativo(
         pdf.heading("Traços de Personalidade (Big Five)", number=4)
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
 
-        # tabela simples de traços
         for trait_name, valor in traits.items():
             if valor is None:
                 continue
@@ -564,6 +564,7 @@ def gerar_pdf_corporativo(
         )
         gauge_fig = criar_gauge_fit(compat)
 
+        # começa visualizações em nova página (fica mais limpo)
         pdf.add_page()
         pdf.heading("Visualizações (Gráficos)", number=5)
 
@@ -594,11 +595,11 @@ def gerar_pdf_corporativo(
         if not _embed_center(radar_fig, 170, center=False):
             pdf.paragraph("⚠️ Instale 'kaleido' para embutir gráficos no PDF.", size=8)
         else:
-            pdf.ln(2)
+            pdf.ln(1)
             pdf.paragraph(
                 "Este radar compara o perfil do candidato às faixas ideais para o cargo. "
-                "Dê atenção especial a Extroversão, Amabilidade e Abertura (Inovação), "
-                "bem como a Neuroticismo (quanto menor, melhor).",
+                "Observe Extroversão, Amabilidade e Abertura (Inovação), além de Neuroticismo "
+                "(quanto menor, melhor).",
                 size=8,
             )
 
@@ -609,12 +610,11 @@ def gerar_pdf_corporativo(
         if not _embed_center(gauge_fig, 110, center=True):
             pdf.paragraph("⚠️ Falha ao embutir gráfico de Fit.", size=8)
         else:
-            pdf.ln(2)
+            pdf.ln(1)
             pdf.paragraph(
                 "O indicador de fit sintetiza os principais fatores comportamentais e emocionais. "
-                "Valores acima de 70% indicam boa aderência geral; valores entre 40% e 70% sugerem "
-                "aderência parcial com necessidade de desenvolvimento; abaixo de 40% indicam risco "
-                "maior para o desempenho esperado.",
+                "Acima de 70% indica boa aderência; entre 40% e 70% sugere aderência parcial "
+                "com necessidade de desenvolvimento; abaixo de 40% indica risco maior.",
                 size=8,
             )
 
@@ -626,18 +626,18 @@ def gerar_pdf_corporativo(
             if not _embed_center(comp_fig, 170, center=False):
                 pdf.paragraph("⚠️ Falha ao embutir gráfico de Competências.", size=8)
             else:
-                pdf.ln(2)
+                pdf.ln(1)
                 pdf.paragraph(
-                    "As barras em verde indicam boas evidências de desempenho para a competência. "
-                    "Barras em amarelo sugerem atenção ou desenvolvimento desejável. "
-                    "Barras em vermelho apontam competências potencialmente críticas para o cargo.",
+                    "Barras em verde indicam boas evidências de desempenho. "
+                    "Amarelo sugere ponto de atenção e desenvolvimento. Vermelho indica "
+                    "competências potencialmente críticas para o cargo.",
                     size=8,
                 )
         else:
             pdf.paragraph("Sem competências mapeadas para exibição.", size=8)
 
         # ---------------- 6. SAÚDE EMOCIONAL E RESILIÊNCIA ----------------
-        pdf.add_page()
+        # 🔥 sem add_page aqui: deixa o conteúdo continuar na mesma página, se couber
         pdf.heading("Saúde Emocional e Resiliência", number=6)
         saude = (analysis or {}).get("saude_emocional_contexto", "")
         if saude:
@@ -654,11 +654,11 @@ def gerar_pdf_corporativo(
                 label = k.replace("_", " ").capitalize()
                 pdf.safe_cell(70, 5, f"{label}: ")
                 pdf.safe_cell(0, 5, f"{float(v):.0f}/100", ln=1)
-            pdf.ln(2)
+            pdf.ln(1)
             pdf.paragraph(
                 "Valores mais elevados em estresse, ansiedade ou impulsividade podem indicar "
-                "maior vulnerabilidade emocional. Valores mais baixos tendem a favorecer "
-                "resiliência e estabilidade, especialmente em funções de alta pressão.",
+                "maior vulnerabilidade emocional. Valores mais baixos favorecem resiliência e "
+                "estabilidade, principalmente em funções de alta pressão.",
                 size=8,
             )
 
@@ -685,13 +685,13 @@ def gerar_pdf_corporativo(
             pdf.bullet_list(pa, size=9, bullet="•")
 
         # ---------------- 9. RECOMENDAÇÕES DE DESENVOLVIMENTO ----------------
-        pdf.add_page()
+        # 🔥 também sem add_page forçado: deixa o auto page break trabalhar
         pdf.heading("Recomendações de Desenvolvimento", number=9)
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         if recs:
             pdf.paragraph(
-                "Sugestões de ações práticas, trilhas de aprendizagem e focos de desenvolvimento "
-                "para apoiar a evolução do candidato no médio prazo.",
+                "Sugestões de ações práticas e trilhas de aprendizagem para apoiar o desenvolvimento "
+                "do candidato no médio prazo.",
                 size=8,
             )
             for i, rec in enumerate(recs, 1):
@@ -710,8 +710,8 @@ def gerar_pdf_corporativo(
         if cargos_alt:
             pdf.heading("Cargos Alternativos Sugeridos", number=10)
             pdf.paragraph(
-                "Sugestões de posições em que o perfil mapeado pode apresentar maior ou "
-                "boa aderência, considerando os traços comportamentais observados.",
+                "Sugestões de posições em que o perfil mapeado pode apresentar boa aderência, "
+                "considerando os traços comportamentais observados.",
                 size=8,
             )
             for cargo_info in cargos_alt:
@@ -727,7 +727,7 @@ def gerar_pdf_corporativo(
                 pdf.ln(1)
 
         # rodapé institucional extra no corpo do relatório
-        pdf.ln(3)
+        pdf.ln(2)
         pdf.set_font(pdf._family, "I", 7)
         pdf.safe_multi_cell(
             0,
@@ -744,7 +744,6 @@ def gerar_pdf_corporativo(
             if isinstance(out_bytes, str):
                 out_bytes = out_bytes.encode("latin-1", "replace")
         except Exception:
-            # fallback simples
             fb = PDFReport()
             fb.set_main_family("Helvetica", False)
             fb.add_page()
@@ -776,5 +775,4 @@ def gerar_pdf_corporativo(
 
     except Exception as e:
         st.error(f"Erro crítico na geração do PDF: {e}")
-        # PDF mínimo, só para não quebrar o download
         return io.BytesIO(b"%PDF-1.4\n%EOF\n")
