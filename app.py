@@ -1,463 +1,379 @@
-
+# app.py
 from __future__ import annotations
 
-import os
-import re
-import json
-import time
+import io
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
-import pandas as pd
 import streamlit as st
-from pdfminer.high_level import extract_text
 
-
+from eba_config import (
+    APP_NAME,
+    APP_VERSION,
+    APP_TAGLINE,
+    gerar_perfil_cargo_dinamico,
+)
 from eba_llm import (
     TokenTracker,
+    get_api_key_for_provider,
     extract_bfa_data,
     analyze_bfa_data,
     chat_with_elder_brain,
     send_admin_report_if_configured,
-    get_api_key_for_provider,
+    send_pdf_report_email,
 )
-
-from eba_reports import (
-    criar_radar_bfa,
-    criar_grafico_competencias,
-    criar_gauge_fit,
-    gerar_pdf_corporativo,
-)
+from eba_reports import gerar_pdf_corporativo
 
 
+# ========= EXTRAÇÃO DE TEXTO DE PDF =========
 try:
-    from eba_config import (
-        DARK_CSS,
-        PROCESSED_DIR,
-        TRAINING_DIR,
-        gerar_perfil_cargo_dinamico,
-    )
-except Exception:  
-    DARK_CSS = ""
-    PROCESSED_DIR = "relatorios_processados"
-    TRAINING_DIR = "training_data"
-
-    def gerar_perfil_cargo_dinamico(cargo: str) -> Dict[str, Any]:
-        return {"traits_ideais": {}, "competencias_criticas": []}
+    import pypdf  # biblioteca leve para leitura de PDF
+except Exception:
+    pypdf = None  # type: ignore
 
 
-os.makedirs(PROCESSED_DIR, exist_ok=True)
-os.makedirs(TRAINING_DIR, exist_ok=True)
-
-
-
-def extract_pdf_text_bytes(file) -> str:
- 
-    try:
-        return extract_text(file)
-    except Exception as e:
-        return f"[ERRO_EXTRACAO_PDF] {e}"
-
-
-def load_all_training_texts() -> str:
-    
+def extract_text_from_pdf(file) -> str:
+    """Extrai texto de um PDF usando pypdf, se disponível."""
+    if pypdf is None:
+        raise RuntimeError(
+            "Biblioteca 'pypdf' não está instalada. "
+            "Adicione 'pypdf' ao requirements.txt para habilitar extração de PDF."
+        )
+    reader = pypdf.PdfReader(file)
     texts = []
-    try:
-        fnames = sorted(os.listdir(TRAINING_DIR))
-    except FileNotFoundError:
-        return ""
-
-    for fname in fnames:
-        path = os.path.join(TRAINING_DIR, fname)
+    for page in reader.pages:
         try:
-            if fname.lower().endswith(".pdf"):
-                with open(path, "rb") as f:
-                    txt = extract_text(f)
-            else:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                    txt = f.read()
-            texts.append(f"--- {fname} ---\n{txt[:2000]}\n")
+            txt = page.extract_text() or ""
         except Exception:
-            continue
-    return "\n".join(texts)
+            txt = ""
+        texts.append(txt)
+    return "\n\n".join(texts).strip()
 
 
+# ========= CONFIG BÁSICA =========
+DEFAULT_PROVIDER = "groq"
+DEFAULT_MODEL_ID = "llama-3.1-8b-instant"
 
-def kpi_card(title: str, value: str, sub: str | None = None) -> None:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-          <div style="font-weight:700;font-size:1.02rem">{title}</div>
-          <div style="font-size:1.9rem;margin:.2rem 0 .25rem 0">{value}</div>
-          <div class="small">{sub or ""}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+
+def init_session_state() -> None:
+    if "email_empresarial" not in st.session_state:
+        st.session_state.email_empresarial = ""
+    if "bfa_data" not in st.session_state:
+        st.session_state.bfa_data = None
+    if "analysis" not in st.session_state:
+        st.session_state.analysis = None
+    if "pdf_buffer" not in st.session_state:
+        st.session_state.pdf_buffer = None
+    if "last_error" not in st.session_state:
+        st.session_state.last_error = ""
+
+
+# ========= UI AUXILIAR =========
+def render_header():
+    st.title(APP_NAME)
+    st.caption(f"{APP_TAGLINE} · v{APP_VERSION}")
+
+
+def render_sidebar():
+    st.sidebar.markdown("### Sobre o Elder Brain Analytics")
+    st.sidebar.write(
+        "Ferramenta de apoio à decisão para **análise comportamental BFA** "
+        "e aderência a cargos, desenvolvida para uso corporativo."
     )
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Versão:** " + APP_VERSION)
+    st.sidebar.markdown("**Módulo:** Relatórios BFA → PDF corporativo")
 
 
+def render_result_panel():
+    """Painel da direita com resumo do resultado e botão de download."""
+    bfa_data = st.session_state.bfa_data
+    analysis = st.session_state.analysis
+    pdf_buffer: Optional[io.BytesIO] = st.session_state.pdf_buffer
 
-def main() -> None:
+    if not analysis or not bfa_data:
+        st.info(
+            "📄 Após processar um laudo BFA, o resumo executivo e o botão de download "
+            "do relatório em PDF aparecerão aqui."
+        )
+        return
+
+    st.subheader("Resumo Executivo")
+
+    # métricas principais
+    col_a, col_b, col_c = st.columns(3)
+    compat = float(analysis.get("compatibilidade_geral", 0) or 0)
+    decisao = analysis.get("decisao", "N/A")
+    cargos_alt = analysis.get("cargos_alternativos", []) or []
+
+    with col_a:
+        st.metric("Compatibilidade Geral", f"{compat:.0f}%")
+    with col_b:
+        st.metric("Decisão", decisao)
+    with col_c:
+        st.metric("Cargos alternativos sugeridos", len(cargos_alt))
+
+    resumo_exec = analysis.get("resumo_executivo") or ""
+    if resumo_exec:
+        st.markdown("#### Síntese da Avaliação")
+        st.write(resumo_exec)
+
+    # recomendações
+    recs = analysis.get("recomendacoes_desenvolvimento", []) or []
+    if recs:
+        st.markdown("#### Recomendações de desenvolvimento")
+        for r in recs:
+            if r:
+                st.write(f"- {r}")
+
+    # botão de download do PDF
+    if pdf_buffer is not None:
+        st.markdown("---")
+        candidato = (bfa_data or {}).get("candidato", {}) or {}
+        nome_cand = candidato.get("nome") or "candidato"
+        file_name = f"eba_relatorio_{nome_cand.replace(' ', '_')}.pdf"
+
+        st.download_button(
+            label="⬇️ Baixar relatório em PDF",
+            data=pdf_buffer,
+            file_name=file_name,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    else:
+        st.warning(
+            "O relatório ainda não foi gerado em PDF nesta sessão. "
+            "Clique em **Processar relatório** novamente se necessário."
+        )
+
+
+# ========= FLUXO PRINCIPAL =========
+def main():
     st.set_page_config(
-        page_title="EBA — Corporate",
+        page_title=APP_NAME,
         page_icon="🧠",
         layout="wide",
     )
-    if DARK_CSS:
-        st.markdown(DARK_CSS, unsafe_allow_html=True)
+    init_session_state()
 
-    ss = st.session_state
-    ss.setdefault("provider", "Groq")
-    ss.setdefault("modelo", "llama-3.1-8b-instant")
-    ss.setdefault("cargo", "")
-    ss.setdefault("analysis_complete", False)
-    ss.setdefault("bfa_data", None)
-    ss.setdefault("analysis", None)
-    ss.setdefault("pdf_generated", None)
-    ss.setdefault("tracker", TokenTracker())
-    ss.setdefault("email_empresarial", "")
+    render_header()
+    render_sidebar()
 
-    tracker: TokenTracker = ss["tracker"]
+    col_left, col_right = st.columns([1.2, 1])
 
-   
-    st.markdown("## 🧠 Elder Brain Analytics — Corporate")
-    st.markdown(
-        '<span class="badge">PDF Corporativo</span> '
-        '<span class="badge">Seguro</span> '
-        '<span class="badge">Streamlit Cloud</span>',
-        unsafe_allow_html=True,
-    )
+    with col_left:
+        st.subheader("Entrada do Laudo BFA")
 
-   
-    with st.sidebar:
-        st.header("⚙️ configuração")
-
-       
-        provider = "Groq"
-        modelo = "llama-3.1-8b-instant"
-        ss["provider"] = provider
-        ss["modelo"] = modelo
-
-      
-        try:
-            token = get_api_key_for_provider(provider)
-        except Exception as e:
-            st.error(f"Erro na configuração da API: {e}")
-            token = ""
-
-        st.caption("motor de ia: Groq · temperatura 0.3 · máx. 4096 tokens")
-
-       
-        ss["cargo"] = st.text_input("Cargo para análise", value=ss.get("cargo", ""))
-
-    
-        email_empresarial = st.text_input(
-            "Email empresarial (opcional)",
-            value=ss.get("email_empresarial", ""),
-            placeholder="ex.: pessoa@empresa.com",
+        cargo = st.text_input(
+            "Cargo avaliado",
+            value="",
+            placeholder="Ex.: Engenheiro de Software Pleno",
+            help="Nome do cargo ou função que está sendo avaliada.",
         )
-        ss["email_empresarial"] = email_empresarial
 
-      
-        if ss["cargo"]:
-            from eba_config import gerar_perfil_cargo_dinamico as _perfil 
+        email_empresarial = st.text_input(
+            "Email empresarial *",
+            key="email_empresarial",
+            placeholder="nome.sobrenome@empresa.com",
+            help=(
+                "E-mail corporativo utilizado para registro de uso e envio automático do relatório. "
+                "Campo obrigatório."
+            ),
+        )
 
-            with st.expander("Perfil gerado (dinâmico)"):
-                st.json(_perfil(ss["cargo"]))
+        st.markdown("##### Laudo BFA")
+        uploaded_pdf = st.file_uploader(
+            "Anexe o laudo BFA em PDF (opcional)",
+            type=["pdf"],
+            help="Se preferir, você também pode colar o laudo em texto logo abaixo.",
+        )
+        raw_text = st.text_area(
+            "Ou cole o laudo BFA em formato de texto",
+            value="",
+            height=260,
+        )
 
-        st.markdown("---")
-        st.caption("admin: logs detalhados são enviados por e-mail (quando configurado).")
+        processar = st.button(
+            "⚙️ Processar relatório",
+            type="primary",
+            use_container_width=True,
+        )
 
+        if processar:
+            # validações básicas
+            if not email_empresarial or "@" not in email_empresarial:
+                st.error("Informe um **e-mail empresarial válido** para continuar.")
+                return
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        kpi_card("Status", "Pronto", "aguardando PDF")
+            if not cargo.strip():
+                st.error("Informe o **cargo avaliado** para continuar.")
+                return
 
-    with c2:
-        kpi_card("Relatórios", "—", "")
-    with c3:
-        kpi_card("Andamento", "—", "")
-    with c4:
-        kpi_card("Disponibilidade", "Online", "")
+            texto_laudo = ""
+            if uploaded_pdf is not None:
+                try:
+                    texto_laudo = extract_text_from_pdf(uploaded_pdf)
+                except Exception as e:
+                    st.error(
+                        f"Não foi possível extrair o texto do PDF: {e}. "
+                        "Você pode colar o texto manualmente no campo abaixo."
+                    )
+                    return
+            elif raw_text.strip():
+                texto_laudo = raw_text.strip()
+            else:
+                st.error(
+                    "Anexe um PDF ou cole o laudo em texto para que o Elder Brain Analytics possa analisar."
+                )
+                return
 
+            if len(texto_laudo) < 500:
+                st.warning(
+                    "O laudo parece muito curto. Considere utilizar o relatório completo "
+                    "para obter uma análise mais robusta."
+                )
 
-    st.markdown("### 📄 Upload do Relatório BFA")
-    uploaded_file = st.file_uploader("Carregue o PDF do relatório BFA", type=["pdf"])
+            with st.spinner("Processando laudo com o Elder Brain Analytics..."):
+                provider = DEFAULT_PROVIDER
+                model_id = DEFAULT_MODEL_ID
 
+                # token da API (Groq ou outro) vem dos secrets
+                try:
+                    api_key = get_api_key_for_provider(provider)
+                except Exception as e:
+                    st.error(f"Erro ao obter chave da API: {e}")
+                    return
 
-    if uploaded_file:
-        if not ss["cargo"]:
-            st.error("Informe o cargo na sidebar antes de processar.")
-            st.stop()
-        if not token:
-            st.error(
-                "Chave da API não configurada nos Secrets do Streamlit "
-                "(GROQ_API_KEY)."
-            )
-            st.stop()
+                tracker = TokenTracker(model=model_id, provider=provider)
 
-        with st.spinner("Extraindo texto do PDF..."):
-            raw_text = extract_pdf_text_bytes(uploaded_file)
-        if raw_text.startswith("[ERRO_EXTRACAO_PDF]"):
-            st.error(raw_text)
-            st.stop()
-        st.success("✓ texto extraído com sucesso")
+                # contexto de treinamento → por enquanto vazio (rodando "em segundo plano" no futuro)
+                training_context = ""
 
-   
-
-        if st.button("🔬 ANALISAR RELATÓRIO", type="primary", use_container_width=True):
-            with st.spinner("Preparando contexto de treinamento..."):
-                training_context = load_all_training_texts() 
-
-           
-            with st.spinner("Etapa 1/2: extraindo dados do relatório..."):
-                bfa_data, raw1 = extract_bfa_data(
-                    text=raw_text,
-                    cargo=ss["cargo"],
+                # 1) Extração estruturada
+                bfa_data, extr_raw = extract_bfa_data(
+                    text=texto_laudo,
+                    cargo=cargo,
                     training_context=training_context,
                     provider=provider,
-                    model_id=ss["modelo"],
-                    token=token,
+                    model_id=model_id,
+                    token=api_key,
                     tracker=tracker,
                 )
+                if bfa_data is None:
+                    st.error(
+                        "Falha na etapa de **extração dos dados BFA**. "
+                        f"Detalhes: {extr_raw}"
+                    )
+                    return
 
-            if not bfa_data:
-                st.error("Falha na extração do relatório.")
-                with st.expander("Resposta bruta da IA"):
-                    st.code(raw1)
-                st.stop()
+                # 2) Geração de perfil ideal dinâmico + análise de fit
+                try:
+                    perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
+                except Exception:
+                    perfil_cargo = {}
 
-            
-            perfil_cargo = gerar_perfil_cargo_dinamico(ss["cargo"])
-            with st.spinner("Etapa 2/2: analisando compatibilidade..."):
-                analysis, raw2 = analyze_bfa_data(
+                analysis, anal_raw = analyze_bfa_data(
                     bfa_data=bfa_data,
-                    cargo=ss["cargo"],
+                    cargo=cargo,
                     perfil_cargo=perfil_cargo,
                     provider=provider,
-                    model_id=ss["modelo"],
-                    token=token,
+                    model_id=model_id,
+                    token=api_key,
                     tracker=tracker,
                 )
-
-            if not analysis:
-                st.error("Falha na análise de compatibilidade.")
-                with st.expander("Resposta bruta da IA"):
-                    st.code(raw2)
-                st.stop()
-
-           
-            ss["bfa_data"] = bfa_data
-            ss["analysis"] = analysis
-            ss["analysis_complete"] = True
-
-            st.success("✓ análise concluída!")
-
-           
-            if hasattr(st, "rerun"):
-                st.rerun()
-            elif hasattr(st, "experimental_rerun"):
-                st.experimental_rerun()
-
-
-   
-    if ss.get("analysis_complete") and ss.get("bfa_data") and ss.get("analysis"):
-        st.markdown("## 📊 Resultados")
-
-        decisao = ss["analysis"].get("decisao", "N/A")
-        compat = float(ss["analysis"].get("compatibilidade_geral", 0) or 0)
-
-        c1, c2, c3 = st.columns([2, 1, 1])
-        with c1:
-            st.markdown(f"### 🏷️ decisão: **{decisao}**")
-        with c2:
-            st.metric("Compatibilidade", f"{compat:.0f}%")
-        with c3:
-            st.metric(
-                "Liderança",
-                ss["bfa_data"].get("potencial_lideranca", "N/A"),
-            )
-
-        with st.expander("📋 Resumo Executivo", expanded=True):
-            st.write(ss["analysis"].get("resumo_executivo", ""))
-        st.info(ss["analysis"].get("justificativa_decisao", ""))
-
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            [
-                "🎯 Big Five",
-                "💼 Competências",
-                "🧘 Saúde Emocional",
-                "📈 Desenvolvimento",
-                "📄 Dados Brutos",
-            ]
-        )
-
-      
-        with tab1:
-            traits = ss["bfa_data"].get("traits_bfa", {}) or {}
-            fig_radar = criar_radar_bfa(
-                traits,
-                gerar_perfil_cargo_dinamico(ss["cargo"]).get("traits_ideais", {}),
-            )
-            st.plotly_chart(fig_radar, use_container_width=True)
-
-      
-        with tab2:
-            comps = ss["bfa_data"].get("competencias_ms", []) or []
-            figc = criar_grafico_competencias(comps)
-            if figc:
-                st.plotly_chart(figc, use_container_width=True)
-            st.markdown("##### Competências Críticas")
-            for comp in ss["analysis"].get("competencias_criticas", []):
-                status = comp.get("status")
-                compn = comp.get("competencia")
-                txt = comp.get("avaliacao", "")
-                if status == "ATENDE":
-                    st.success(f"✓ {compn} — {status}")
-                    st.caption(txt)
-                elif status == "PARCIAL":
-                    st.warning(f"⚠ {compn} — {status}")
-                    st.caption(txt)
-                else:
-                    st.error(f"✗ {compn} — {status}")
-                    st.caption(txt)
-            if comps:
-                with st.expander("Ver todas as competências"):
-                    df_comp = pd.DataFrame(comps).sort_values(
-                        "nota", ascending=False
+                if analysis is None:
+                    st.error(
+                        "Falha na etapa de **análise de compatibilidade**. "
+                        f"Detalhes: {anal_raw}"
                     )
-                    st.dataframe(
-                        df_comp,
-                        use_container_width=True,
-                        hide_index=True,
+                    return
+
+                # guarda no session_state
+                st.session_state.bfa_data = bfa_data
+                st.session_state.analysis = analysis
+
+                # 3) Geração do PDF corporativo
+                try:
+                    pdf_buffer = gerar_pdf_corporativo(
+                        bfa_data=bfa_data,
+                        analysis=analysis,
+                        cargo=cargo,
+                        logo_path=None,  # se tiver logo, coloque o caminho aqui
                     )
-            else:
-                st.warning("Nenhuma competência extraída.")
+                    st.session_state.pdf_buffer = pdf_buffer
+                except Exception as e:
+                    st.session_state.pdf_buffer = None
+                    st.error(f"Erro ao gerar o PDF corporativo: {e}")
+                    return
 
-    
-        with tab3:
-            st.subheader("Saúde Emocional e Resiliência")
-            st.write(ss["analysis"].get("saude_emocional_contexto", ""))
-            indicadores = ss["bfa_data"].get(
-                "indicadores_saude_emocional", {}
-            ) or {}
-            if any(v is not None for v in indicadores.values()):
-                st.markdown("##### Indicadores (0–100, menor melhor)")
-                cols = st.columns(2)
-                for i, (k, v) in enumerate(indicadores.items()):
-                    if v is None:
-                        continue
-                    with cols[i % 2]:
-                        st.metric(k.replace("_", " ").title(), f"{float(v):.0f}")
-            facetas = ss["bfa_data"].get("facetas_relevantes", []) or []
-            if facetas:
-                st.markdown("##### Facetas Relevantes")
-                for fct in facetas:
-                    st.write(f"- **{fct.get('nome','')}**")
-                    st.caption(fct.get("interpretacao", ""))
+                # 4) Envio de log técnico (Excel) para o administrador
+                candidato = (bfa_data or {}).get("candidato", {}) or {}
+                nome_candidato = candidato.get("nome", "")
 
-       
-        with tab4:
-            st.subheader("Recomendações de Desenvolvimento")
-            recs = ss["analysis"].get("recomendacoes_desenvolvimento", []) or []
-            if recs:
-                for i, rec in enumerate(recs, 1):
-                    st.markdown(f"**{i}. {rec}**")
-            else:
-                st.caption("Nenhuma recomendação específica foi gerada.")
-            cargos_alt = ss["analysis"].get("cargos_alternativos", []) or []
-            if cargos_alt:
-                st.markdown("##### Cargos Alternativos")
-                for c in cargos_alt:
-                    st.write(f"- **{c.get('cargo','')}** — {c.get('justificativa','')}")
-
-       
-        with tab5:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.json(ss["bfa_data"])
-            with c2:
-                st.json(ss["analysis"])
-
-       
-        st.markdown("### 🎯 Compatibilidade Geral")
-        st.plotly_chart(criar_gauge_fit(compat), use_container_width=True)
-
-  
-        st.markdown("### 📄 Gerar PDF corporativo")
-        logo_path = st.text_input("Caminho para logo (opcional)", value="")
-
-        if st.button("🔨 Gerar PDF", key="gen_pdf"):
-           
-            email_emp = (ss.get("email_empresarial") or "").strip()
-            if email_emp:
-                ss.setdefault("bfa_data", {})
-                ss["bfa_data"].setdefault("candidato", {})
-                ss["bfa_data"]["candidato"]["email_empresarial"] = email_emp
-
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            nome = (
-                (ss["bfa_data"].get("candidato", {}) or {}).get("nome") or "candidato"
-            )
-            nome = re.sub(r"[^\w\s-]", "", str(nome)).strip().replace(" ", "_")
-            fname = f"relatorio_{nome}_{ts}.pdf"
-            path = os.path.join(PROCESSED_DIR, fname)
-
-            buf = gerar_pdf_corporativo(
-                bfa_data=ss["bfa_data"],
-                analysis=ss["analysis"],
-                cargo=ss["cargo"],
-                save_path=path,
-                logo_path=logo_path if logo_path else None,
-            )
-
-           
-            tracker.add("pdf", 0, 0)
-
-            if buf.getbuffer().nbytes > 100:
-                ss["pdf_generated"] = {"buffer": buf, "filename": fname}
-                st.success(f"✓ PDF gerado: {fname}")
-
-               
                 send_admin_report_if_configured(
                     tracker=tracker,
                     provider=provider,
-                    model=modelo,
+                    model=model_id,
+                    meta={
+                        "cargo": cargo,
+                        "email_empresarial": email_empresarial,
+                        "nome_candidato": nome_candidato,
+                    },
                 )
-            else:
-                st.error("Arquivo PDF vazio (erro na geração).")
 
-        if ss.get("pdf_generated"):
-            st.download_button(
-                "⬇️ Download do PDF",
-                data=ss["pdf_generated"]["buffer"].getvalue(),
-                file_name=ss["pdf_generated"]["filename"],
-                mime="application/pdf",
-                use_container_width=True,
+                # 5) Envio automático do PDF por e-mail (cofre + analista)
+                try:
+                    pdf_bytes = pdf_buffer.getvalue()
+                except Exception:
+                    pdf_bytes = None
+
+                if pdf_bytes:
+                    send_pdf_report_email(
+                        pdf_bytes=pdf_bytes,
+                        meta={
+                            "cargo": cargo,
+                            "email_empresarial": email_empresarial,
+                            "nome_candidato": nome_candidato,
+                        },
+                    )
+
+                st.success("Relatório processado com sucesso! 🎯")
+
+    with col_right:
+        render_result_panel()
+
+        # opcional: espaço para dúvidas ao Elder Brain sobre o mesmo laudo
+        bfa_data = st.session_state.bfa_data
+        analysis = st.session_state.analysis
+        if bfa_data and analysis:
+            st.markdown("---")
+            st.markdown("#### Pergunte ao Elder Brain sobre este candidato")
+            question = st.text_input(
+                "Digite uma pergunta (opcional)",
+                placeholder="Ex.: Quais são os principais riscos deste perfil para uma função de liderança?",
             )
+            if st.button("Perguntar", use_container_width=True):
+                provider = DEFAULT_PROVIDER
+                model_id = DEFAULT_MODEL_ID
 
-        
-        st.markdown("### 💬 Chat com o Elder Brain")
-        q = st.text_input(
-            "Pergunte sobre este relatório",
-            placeholder="ex.: Principais riscos para este cargo?",
-        )
-        if q and st.button("Enviar", key="ask"):
-            with st.spinner("Pensando..."):
-                ans = chat_with_elder_brain(
-                    question=q,
-                    bfa_data=ss["bfa_data"],
-                    analysis=ss["analysis"],
-                    cargo=ss["cargo"],
+                try:
+                    api_key = get_api_key_for_provider(provider)
+                except Exception as e:
+                    st.error(f"Erro ao obter chave da API: {e}")
+                    return
+
+                tracker = TokenTracker(model=model_id, provider=provider)
+                answer = chat_with_elder_brain(
+                    question=question,
+                    bfa_data=bfa_data,
+                    analysis=analysis,
+                    cargo="",
                     provider=provider,
-                    model_id=ss["modelo"],
-                    token=token,
+                    model_id=model_id,
+                    token=api_key,
                     tracker=tracker,
                 )
-            st.markdown(f"**Você:** {q}")
-            st.markdown(f"**Elder Brain:** {ans}")
-
-    st.caption(f"📁 Relatórios salvos em: `{PROCESSED_DIR}`")
+                st.write(answer)
 
 
 if __name__ == "__main__":
