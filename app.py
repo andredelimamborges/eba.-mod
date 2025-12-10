@@ -406,29 +406,80 @@ def main():
 
         st.markdown("---")
 
-        # ---------- GRÁFICOS ----------
+        # prepara gráficos
         competencias = (bfa_data or {}).get("competencias_ms", []) or []
-
         radar_fig = criar_radar_bfa(traits, perfil_cargo.get("traits_ideais", {}))
         comp_fig = criar_grafico_competencias(competencias)
         gauge_fig = criar_gauge_fit(compat)
 
-        st.subheader("Visualizações")
+        # ========= ABAS =========
+        tab_bfa, tab_comp, tab_saude, tab_dev, tab_raw = st.tabs(
+            ["🎯 Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados Brutos"]
+        )
 
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
+        # 🎯 BIG FIVE
+        with tab_bfa:
+            st.markdown("#### Perfil Big Five x Perfil Ideal")
             st.plotly_chart(radar_fig, use_container_width=True)
-        with col_g2:
             st.plotly_chart(gauge_fig, use_container_width=True)
 
-        if comp_fig:
-            st.plotly_chart(comp_fig, use_container_width=True)
+            st.markdown("**Traços numéricos:**")
+            st.write(pd.DataFrame(
+                [{"Traço": k, "Valor (0–10)": v} for k, v in traits.items()]
+            ))
+
+        # 💼 COMPETÊNCIAS
+        with tab_comp:
+            st.markdown("#### Competências MS")
+            if comp_fig:
+                st.plotly_chart(comp_fig, use_container_width=True)
+            else:
+                st.info("Nenhuma competência estruturada foi identificada no laudo.")
+            if competencias:
+                st.markdown("**Tabela de competências:**")
+                st.write(pd.DataFrame(competencias))
+
+        # 🧘 SAÚDE EMOCIONAL
+        with tab_saude:
+            st.markdown("#### Saúde Emocional e Resiliência")
+            saude_txt = analysis.get("saude_emocional_contexto", "")
+            if saude_txt:
+                st.write(saude_txt)
+            indicadores = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
+            if indicadores:
+                st.markdown("**Indicadores numéricos:**")
+                st.write(pd.DataFrame(
+                    [{"Indicador": k, "Valor (0–100)": v} for k, v in indicadores.items()]
+                ))
+
+        # 📈 DESENVOLVIMENTO
+        with tab_dev:
+            st.markdown("#### Recomendações de Desenvolvimento")
+            recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
+            if recs:
+                for i, rec in enumerate(recs, 1):
+                    st.markdown(f"**{i}.** {rec}")
+            else:
+                st.info("Nenhuma recomendação específica foi registrada.")
+
+            st.markdown("#### Cargos Alternativos Sugeridos")
+            cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
+            if cargos_alt:
+                st.write(pd.DataFrame(cargos_alt))
+            else:
+                st.info("Não foram sugeridos cargos alternativos neste laudo.")
+
+        # 📄 DADOS BRUTOS
+        with tab_raw:
+            st.markdown("#### JSON bruto — BFA extraído")
+            st.json(bfa_data)
+            st.markdown("#### JSON bruto — Análise comportamental")
+            st.json(analysis)
 
         st.markdown("---")
 
         # ---------- PDF ----------
         st.subheader("Relatório em PDF")
-
         if pdf_bytes:
             pdf_buffer = io.BytesIO(pdf_bytes)
             st.download_button(
@@ -438,7 +489,6 @@ def main():
                 mime="application/pdf",
             )
         else:
-            # fallback – se por algum motivo não tiver bytes em sessão, regenera
             pdf_buffer = gerar_pdf_corporativo(
                 bfa_data=bfa_data,
                 analysis=analysis,
