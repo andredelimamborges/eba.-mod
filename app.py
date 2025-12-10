@@ -33,11 +33,10 @@ from eba_utils import (
     save_training_snippet,
 )
 
-# =================== CONFIG BÁSICA ===================
 
-# travamos provider para GROQ no momento (UI não escolhe mais)
+# =================== CONFIG BÁSICA ===================
 LLM_PROVIDER = "Groq"
-LLM_MODEL_ID = "openai/gpt-oss-120b"  # ajuste aqui se quiser outro modelo Groq
+LLM_MODEL_ID = "llama-3.3-70b-versatile"   # modelo atualizado da Groq
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -78,13 +77,11 @@ def send_usage_excel_if_configured(
     empresa: Optional[str],
     cargo: str,
 ) -> None:
-    """
-    Gera um Excel com o uso de tokens + metadados (empresa, e-mail empresarial, cargo)
-    e envia por e-mail para os endereços configurados.
-    """
+    """Gera um Excel com o uso de tokens + metadados e envia por e-mail."""
+
     cfg = _get_email_config()
     if cfg is None:
-        return  # silencioso se não estiver configurado
+        return  # silencioso
 
     td = tracker.dict()
 
@@ -98,20 +95,14 @@ def send_usage_excel_if_configured(
         "cargo_avaliado": cargo,
         "provider": provider,
         "modelo": model,
-        # tokens por etapa
         "extracao_prompt": _step_vals("extracao")["prompt"],
         "extracao_completion": _step_vals("extracao")["completion"],
         "extracao_total": _step_vals("extracao")["total"],
         "analise_prompt": _step_vals("analise")["prompt"],
         "analise_completion": _step_vals("analise")["completion"],
         "analise_total": _step_vals("analise")["total"],
-        "chat_prompt": _step_vals("chat")["prompt"],
-        "chat_completion": _step_vals("chat")["completion"],
         "chat_total": _step_vals("chat")["total"],
-        "pdf_prompt": _step_vals("pdf")["prompt"],
-        "pdf_completion": _step_vals("pdf")["completion"],
         "pdf_total": _step_vals("pdf")["total"],
-        # totais
         "total_prompt": tracker.total_prompt,
         "total_completion": tracker.total_completion,
         "total_tokens": tracker.total_tokens,
@@ -134,6 +125,7 @@ def send_usage_excel_if_configured(
     destinatarios = [cfg["to_main"]]
     if cfg["to_finance"]:
         destinatarios.append(cfg["to_finance"])
+
     msg["To"] = ", ".join(destinatarios)
 
     corpo = (
@@ -143,7 +135,7 @@ def send_usage_excel_if_configured(
         f"Empresa: {empresa or 'não informado'}\n"
         f"Cargo avaliado: {cargo}\n"
         f"Total de tokens: {row['total_tokens']}\n"
-        f"Custo estimado (tabela GPT): ${row['custo_estimado_usd']:.4f}\n"
+        f"Custo estimado: ${row['custo_estimado_usd']:.4f}\n"
     )
     msg.set_content(corpo)
 
@@ -160,8 +152,7 @@ def send_usage_excel_if_configured(
             server.login(cfg["user"], cfg["pwd"])
             server.send_message(msg)
     except Exception as e:
-        # não quebra o app, só loga visualmente se estiver usando a UI
-        st.warning(f"Falha ao enviar e-mail com Excel de uso: {e}")
+        st.warning(f"Falha ao enviar planilha Excel: {e}")
 
 
 # =================== UI PRINCIPAL ===================
@@ -182,25 +173,24 @@ def _header():
 def main():
     _header()
 
-    # -------- Sidebar: e-mail empresarial obrigatório --------
+    # -------- Sidebar --------
     with st.sidebar:
         st.markdown("### Identificação do Analista")
         email_empresarial = st.text_input(
             "E-mail empresarial (obrigatório)",
             value=st.session_state.get("email_empresarial", ""),
-            help="Utilizado para controle de uso e registro nos logs internos.",
         )
         if email_empresarial:
             st.session_state["email_empresarial"] = email_empresarial
 
         st.markdown("---")
-        st.markdown("### Arquivo / Laudo")
+        st.markdown("### Arquivo do Laudo")
         uploaded_file = st.file_uploader(
             "Envie o laudo em PDF ou TXT",
             type=["pdf", "txt"],
         )
 
-    # -------- Corpo: formulário principal --------
+    # -------- Corpo --------
     st.markdown("### Dados do Laudo")
 
     cargo = st.text_input(
@@ -208,26 +198,43 @@ def main():
         placeholder="Ex.: Engenheiro de Software Pleno",
     )
 
-
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
         processar = st.button("Gerar relatório corporativo", type="primary")
 
-    # espaço para mensagens de status
     status_placeholder = st.empty()
 
     if processar:
 
+        # validações
+        if not email_empresarial.strip():
+            status_placeholder.error("Informe o e-mail empresarial.")
+            return
+
+        if not cargo.strip():
+            status_placeholder.error("Informe o cargo avaliado.")
+            return
+
+        # obter texto do laudo — agora obrigatório via arquivo
+        if uploaded_file is not None:
+            laudo_texto = ler_texto_de_arquivo(uploaded_file)
+        else:
+            laudo_texto = ""
+
+        if not laudo_texto.strip():
+            status_placeholder.error("Envie o laudo em arquivo (PDF ou TXT).")
+            return
+
         status_placeholder.info("Processando laudo com o Elder Brain Analytics...")
 
-        # ---------- LLM / pipeline ----------
+        # ---------- PIPELINE LLM ----------
         tracker = TokenTracker(provider=LLM_PROVIDER, model=LLM_MODEL_ID)
         api_key = get_api_key_for_provider(LLM_PROVIDER)
 
-        # >>> treinamento em segundo plano: contexto histórico de laudos <<<
+        # carregamento dos laudos anteriores (treinamento invisível)
         training_context = load_all_training_texts()
 
-        # 1) extração estruturada
+        # 1) EXTRAÇÃO
         bfa_data, raw_extraction = extract_bfa_data(
             text=laudo_texto,
             cargo=cargo,
@@ -238,10 +245,10 @@ def main():
             tracker=tracker,
         )
         if bfa_data is None:
-            status_placeholder.error(f"Falha na etapa de extração: {raw_extraction}")
+            status_placeholder.error(f"Falha na extração: {raw_extraction}")
             return
 
-        # 2) análise / fit
+        # 2) ANÁLISE
         from eba_config import gerar_perfil_cargo_dinamico
 
         perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
@@ -255,29 +262,28 @@ def main():
             tracker=tracker,
         )
         if analysis is None:
-            status_placeholder.error(f"Falha na etapa de análise: {raw_analysis}")
+            status_placeholder.error(f"Falha na análise: {raw_analysis}")
             return
 
         status_placeholder.success("Relatório gerado com sucesso!")
 
-        # guardamos em sessão (se quiser reaproveitar)
         st.session_state["bfa_data"] = bfa_data
         st.session_state["analysis"] = analysis
         st.session_state["cargo"] = cargo
 
-        # ---------- Empresa / nome do candidato ----------
+        # pegar nome / empresa do laudo
         candidato = bfa_data.get("candidato", {}) or {}
         nome_candidato = candidato.get("nome") or "Não informado"
         empresa = candidato.get("empresa") or ""
 
-        # >>> salva snippet para treinamento futuro <<<
+        # salvar o snippet para treinamento futuro
         save_training_snippet(
             report_text=laudo_texto,
             cargo=cargo,
             empresa=empresa,
         )
 
-        # ---------- UI de resultado ----------
+        # ---------- UI RESULTADOS ----------
         st.markdown("## Resultado do Laudo")
 
         col_a, col_b, col_c = st.columns(3)
@@ -285,24 +291,24 @@ def main():
         decisao = analysis.get("decisao", "N/A")
 
         with col_a:
-            st.metric("Compatibilidade geral", f"{compat:.0f} %")
+            st.metric("Compatibilidade geral", f"{compat:.0f}%")
         with col_b:
             st.metric("Decisão", decisao)
         with col_c:
             st.metric(
-                "Neuroticismo (quanto menor, melhor)",
+                "Neuroticismo",
                 f"{(bfa_data.get('traits_bfa', {}) or {}).get('Neuroticismo', 'N/D')}",
             )
 
         st.markdown(
             f"**Candidato:** {nome_candidato}  \n"
-            f"**Empresa (do laudo):** {empresa or 'não informado'}  \n"
+            f"**Empresa (retirada do laudo):** {empresa or 'não informado'}  \n"
             f"**Cargo avaliado:** {cargo}"
         )
 
         st.markdown("---")
 
-        # ----- gráficos em tela -----
+        # ---------- GRÁFICOS ----------
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
         competencias = (bfa_data or {}).get("competencias_ms", []) or []
 
@@ -311,30 +317,19 @@ def main():
         gauge_fig = criar_gauge_fit(compat)
 
         st.subheader("Visualizações")
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.plotly_chart(radar_fig, use_container_width=True)
-            st.caption(
-                "📌 **Big Five x Perfil Ideal** — observe especialmente Extroversão, Amabilidade e Inovação "
-                "(ligada à Abertura), além de Neuroticismo (quanto menor, melhor)."
-            )
         with col_g2:
             st.plotly_chart(gauge_fig, use_container_width=True)
-            st.caption(
-                "📌 **Fit para o cargo** — indicador global levando em conta Big Five, Resiliência/Emoção, "
-                "Autogestão, Desempenho, Produtividade e Dinamismo."
-            )
 
         if comp_fig:
             st.plotly_chart(comp_fig, use_container_width=True)
-            st.caption(
-                "📌 **Competências MS** — barras verdes indicam boa aderência; laranja e vermelho sinalizam "
-                "pontos de atenção para desenvolvimento ou risco para a função."
-            )
 
         st.markdown("---")
 
-        # ----- Geração de PDF -----
+        # ---------- PDF ----------
         st.subheader("Relatório em PDF")
 
         pdf_buffer = gerar_pdf_corporativo(
@@ -342,7 +337,7 @@ def main():
             analysis=analysis,
             cargo=cargo,
             save_path=None,
-            logo_path=None,  # não usamos logo; eba_reports pode ignorar internamente
+            logo_path=None,
         )
 
         st.download_button(
@@ -352,11 +347,9 @@ def main():
             mime="application/pdf",
         )
 
-        # ----- Logs / e-mails -----
-        # 1) texto de admin (token usage consolidado)
+        # ---------- LOGS INTERNO ----------
         send_admin_report_if_configured(tracker, LLM_PROVIDER, LLM_MODEL_ID)
 
-        # 2) Excel de uso com e-mail empresarial + empresa
         send_usage_excel_if_configured(
             tracker=tracker,
             provider=LLM_PROVIDER,
@@ -366,10 +359,7 @@ def main():
             cargo=cargo,
         )
 
-        st.info(
-            "Uso do relatório registrado em planilha interna (Excel) e enviado para os "
-            "endereços configurados (incluindo financeiro, quando definido em `EBA_FINANCE_TO`)."
-        )
+        st.info("Uso registrado e enviado para os e-mails configurados.")
 
 
 if __name__ == "__main__":
