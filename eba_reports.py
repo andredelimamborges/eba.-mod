@@ -16,11 +16,14 @@ from eba_config import gerar_perfil_cargo_dinamico, APP_VERSION
 # =========================
 # Cores
 # =========================
+# para FPDF (tuplas RGB)
 COLOR_PRIMARY = (84, 66, 142)   # roxo
 COLOR_HEADER_BG = (235, 237, 240)
-COLOR_OK = (46, 204, 113)
-COLOR_WARN = (243, 156, 18)
-COLOR_BAD = (231, 76, 60)
+
+# para Plotly (strings)
+COLOR_OK_HEX = "#2ECC71"
+COLOR_WARN_HEX = "#F39C12"
+COLOR_BAD_HEX = "#E74C3C"
 
 COLOR_CANDIDATO = "#60519b"
 COLOR_IDEAL_MAX = "rgba(46, 213, 115, 0.35)"
@@ -60,7 +63,7 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="toself",
                 name="Faixa Ideal (Máx)",
-                line=dict(color=COLOR_OK),
+                line=dict(color=COLOR_OK_HEX),
                 fillcolor=COLOR_IDEAL_MAX,
             )
         )
@@ -70,7 +73,7 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="tonext",
                 name="Faixa Ideal (Mín)",
-                line=dict(color=COLOR_OK),
+                line=dict(color=COLOR_OK_HEX),
                 fillcolor=COLOR_IDEAL_MIN,
             )
         )
@@ -107,11 +110,11 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
     cores = []
     for n in df["nota"]:
         if n < 45:
-            cores.append(COLOR_BAD)
+            cores.append(COLOR_BAD_HEX)
         elif n < 55:
-            cores.append(COLOR_WARN)
+            cores.append(COLOR_WARN_HEX)
         else:
-            cores.append(COLOR_OK)
+            cores.append(COLOR_OK_HEX)
 
     fig = go.Figure(
         go.Bar(
@@ -145,9 +148,9 @@ def criar_gauge_fit(fit_score: float) -> go.Figure:
                 "axis": {"range": [None, 100]},
                 "bar": {"color": "#54428E"},
                 "steps": [
-                    {"range": [0, 40], "color": "#E74C3C"},
-                    {"range": [40, 70], "color": "#F39C12"},
-                    {"range": [70, 100], "color": "#2ECC71"},
+                    {"range": [0, 40], "color": COLOR_BAD_HEX},
+                    {"range": [40, 70], "color": COLOR_WARN_HEX},
+                    {"range": [70, 100], "color": COLOR_OK_HEX},
                 ],
                 "threshold": {
                     "line": {"color": "#000000", "width": 2},
@@ -495,7 +498,7 @@ def gerar_pdf_corporativo(
             "Não foram sugeridos cargos alternativos específicos com base neste laudo."
         )
 
-    # observação final (igual ao modelo)
+    # observação final
     pdf.paragraph(
         "Este documento não substitui entrevistas, referências e demais etapas do processo seletivo. "
         "Recomenda-se leitura conjunta com o contexto da vaga e cultura da empresa."
