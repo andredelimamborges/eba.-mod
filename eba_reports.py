@@ -54,17 +54,19 @@ def criar_radar_bfa(
 
     fig = go.Figure()
 
+    # faixas ideais – sem line=... pra evitar problema de cor
     if traits_ideais:
         vmin = [traits_ideais.get(k, (0, 10))[0] for k in labels]
         vmax = [traits_ideais.get(k, (0, 10))[1] for k in labels]
+
         fig.add_trace(
             go.Scatterpolar(
                 r=vmax,
                 theta=labels,
                 fill="toself",
                 name="Faixa Ideal (Máx)",
-                line=dict(color=COLOR_OK_HEX),
                 fillcolor=COLOR_IDEAL_MAX,
+                hoverinfo="skip",
             )
         )
         fig.add_trace(
@@ -73,11 +75,12 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="tonext",
                 name="Faixa Ideal (Mín)",
-                line=dict(color=COLOR_OK_HEX),
                 fillcolor=COLOR_IDEAL_MIN,
+                hoverinfo="skip",
             )
         )
 
+    # candidato – aqui mantemos a linha roxa
     fig.add_trace(
         go.Scatterpolar(
             r=vals,
@@ -190,7 +193,6 @@ class PDFReport(FPDF):
         self.set_margins(15, 15, 15)
         self._family = "Helvetica"
 
-    # limpar texto para evitar erros de unicode
     def _clean(self, s: Optional[str]) -> str:
         if not s:
             return ""
@@ -211,7 +213,6 @@ class PDFReport(FPDF):
         for k, v in rep.items():
             s = s.replace(k, v)
 
-        # quebra palavras gigantes
         def _split_long(m):
             token = m.group(0)
             parts = [token[i : i + 60] for i in range(0, len(token), 60)]
@@ -225,7 +226,6 @@ class PDFReport(FPDF):
             return s
 
     def header(self):
-        # capa (página 1) não tem header
         if self.page_no() == 1:
             return
         self.set_y(10)
@@ -291,25 +291,20 @@ def _add_capa(pdf: PDFReport):
     pdf.paragraph(f"Data: {datetime.now():%d/%m/%Y}")
 
 
-# =========================
-# PDF principal
-# =========================
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
     cargo: str,
     save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,  # mantido só por compat
+    logo_path: Optional[str] = None,
 ) -> io.BytesIO:
     pdf = PDFReport()
     _add_capa(pdf)
 
-    # -------- 1. Informações do candidato --------
     pdf.heading(1, "Informações do Candidato")
     cand = bfa_data.get("candidato", {}) or {}
     nome = cand.get("nome", "Não informado") or "Não informado"
     empresa_raw = cand.get("empresa", "Não informado") or "Não informado"
-    # remove coisas entre parênteses
     empresa = re.sub(r"\s*\([^)]*\)", "", empresa_raw).strip() or "Não informado"
 
     pdf.paragraph(f"Nome: {nome}")
@@ -317,14 +312,11 @@ def gerar_pdf_corporativo(
     pdf.paragraph(f"Cargo avaliado: {cargo}")
     pdf.paragraph(f"Data da análise: {datetime.now():%d/%m/%Y %H:%M}")
 
-    # -------- 2. Decisão e compatibilidade --------
     pdf.heading(2, "Decisão e Compatibilidade")
     decisao = analysis.get("decisao", "N/A")
     compat = float(analysis.get("compatibilidade_geral", 0) or 0)
     pdf.set_font(pdf._family, "B", 10)
-    pdf.paragraph(
-        f"DECISÃO: {decisao} | COMPATIBILIDADE GLOBAL: {compat:.0f}%"
-    )
+    pdf.paragraph(f"DECISÃO: {decisao} | COMPATIBILIDADE GLOBAL: {compat:.0f}%")
     pdf.set_font(pdf._family, "", 9)
     pdf.paragraph(
         "Leitura baseada em traços de personalidade, competências críticas e fatores de saúde emocional."
@@ -334,7 +326,6 @@ def gerar_pdf_corporativo(
         pdf.subheading("Justificativa resumida")
         pdf.paragraph(justificativa)
 
-    # -------- 3. Resumo executivo --------
     pdf.heading(3, "Resumo Executivo")
     resumo_exec = analysis.get("resumo_executivo", "")
     if resumo_exec:
@@ -344,7 +335,6 @@ def gerar_pdf_corporativo(
             "O laudo não trouxe um resumo executivo estruturado. Recomenda-se leitura das seções seguintes."
         )
 
-    # -------- 4. Traços de personalidade --------
     pdf.heading(4, "Traços de Personalidade (Big Five)")
     traits = bfa_data.get("traits_bfa", {}) or {}
     for nome_traco, valor in traits.items():
@@ -360,14 +350,12 @@ def gerar_pdf_corporativo(
         for nome_traco, texto in analise_tracos.items():
             pdf.paragraph(f"{nome_traco}: {texto}")
 
-    # -------- 5. Visualizações (gráficos) --------
     pdf.add_page()
     pdf.heading(5, "Visualizações (Gráficos)")
 
     perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
     traits_ideais = perfil_cargo.get("traits_ideais", {}) or {}
 
-    # Radar
     pdf.subheading("Big Five x Perfil Ideal")
     radar_fig = criar_radar_bfa(traits, traits_ideais)
     path = fig_to_png_path(radar_fig, width=1200, height=900, scale=2)
@@ -382,7 +370,6 @@ def gerar_pdf_corporativo(
         "Observe Extroversão, Amabilidade e Abertura (Inovação), além de Neuroticismo (quanto menor, melhor)."
     )
 
-    # Gauge fit
     pdf.subheading("Fit global para o cargo")
     gauge_fig = criar_gauge_fit(compat)
     path = fig_to_png_path(gauge_fig, width=900, height=500, scale=2)
@@ -392,14 +379,12 @@ def gerar_pdf_corporativo(
             os.remove(path)
         except Exception:
             pass
-
     pdf.paragraph(
         "O indicador de fit sintetiza os principais fatores comportamentais e emocionais. "
         "Acima de 70% indica boa aderência; entre 40% e 70% sugere aderência parcial com necessidade de "
         "desenvolvimento; abaixo de 40% indica risco maior."
     )
 
-    # -------- Competências MS (top 15) --------
     competencias = bfa_data.get("competencias_ms", []) or []
     if competencias:
         comp_fig = criar_grafico_competencias(competencias)
@@ -417,7 +402,6 @@ def gerar_pdf_corporativo(
                 "desenvolvimento. Vermelho indica competências potencialmente críticas para o cargo."
             )
 
-    # -------- 6. Saúde emocional e resiliência --------
     pdf.heading(6, "Saúde Emocional e Resiliência")
     saude_txt = analysis.get("saude_emocional_contexto", "")
     if saude_txt:
@@ -437,7 +421,6 @@ def gerar_pdf_corporativo(
             "principalmente em funções de alta pressão."
         )
 
-    # -------- 7. Pontos fortes --------
     pontos_fortes = bfa_data.get("pontos_fortes", []) or []
     pdf.heading(7, "Pontos Fortes")
     if pontos_fortes:
@@ -449,7 +432,6 @@ def gerar_pdf_corporativo(
     else:
         pdf.paragraph("Não foram destacados pontos fortes específicos no laudo.")
 
-    # -------- 8. Pontos de atenção --------
     pontos_atencao = bfa_data.get("pontos_atencao", []) or []
     pdf.heading(8, "Pontos de Atenção")
     if pontos_atencao:
@@ -462,7 +444,6 @@ def gerar_pdf_corporativo(
     else:
         pdf.paragraph("Não foram identificados pontos de atenção estruturados no laudo.")
 
-    # -------- 9. Recomendações de desenvolvimento --------
     pdf.heading(9, "Recomendações de Desenvolvimento")
     recs = analysis.get("recomendacoes_desenvolvimento", []) or []
     if recs:
@@ -477,7 +458,6 @@ def gerar_pdf_corporativo(
             "Não foram sugeridas recomendações específicas de desenvolvimento pelo modelo neste laudo."
         )
 
-    # -------- 10. Cargos alternativos --------
     pdf.heading(10, "Cargos Alternativos Sugeridos")
     alt = analysis.get("cargos_alternativos", []) or []
     if alt:
@@ -498,7 +478,6 @@ def gerar_pdf_corporativo(
             "Não foram sugeridos cargos alternativos específicos com base neste laudo."
         )
 
-    # observação final
     pdf.paragraph(
         "Este documento não substitui entrevistas, referências e demais etapas do processo seletivo. "
         "Recomenda-se leitura conjunta com o contexto da vaga e cultura da empresa."
