@@ -132,7 +132,7 @@ if "analysis" in st.session_state:
     analysis = st.session_state["analysis"]
     bfa_data = st.session_state["bfa_data"]
 
-    st.divider()
+st.divider()
 st.header("📊 Dashboard Analítico — Elder Brain")
 
 perfil = gerar_perfil_cargo_dinamico(cargo)
@@ -225,6 +225,7 @@ with tabs[3]:
 # 📄 DADOS BRUTOS
 with tabs[4]:
     st.json(bfa_data)
+    
     st.download_button(
         "📄 Baixar Relatório em PDF",
         data=st.session_state["pdf_bytes"],
