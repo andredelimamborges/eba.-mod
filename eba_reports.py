@@ -249,7 +249,7 @@ def gerar_pdf_corporativo(
         pdf.set_font("Helvetica", "B", 11)
         pdf.multi_cell(0, 6.5, _pdf_safe("Pontos de Força:"))
         pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe("\n".join(f"- {x}" for x in fortes)))
+        safe_multi_cell(pdf, 6.5, "\n".join(f"- {x}" for x in fortes), 0)
 
     if criticas:
         pdf.ln(1)
@@ -300,3 +300,55 @@ def gerar_pdf_corporativo(
     buf = io.BytesIO(out)
     buf.seek(0)
     return buf
+def _break_long_tokens(t: str, max_len: int = 40) -> str:
+    # quebra qualquer sequência sem espaço com mais de max_len
+    def _split(m):
+        w = m.group(0)
+        return " ".join(w[i:i+max_len] for i in range(0, len(w), max_len))
+    return re.sub(rf"\S{{{max_len},}}", _split, t)
+
+
+def _pdf_safe(text: str) -> str:
+    if text is None:
+        return ""
+    s = str(text)
+
+    repl = {
+        "—": "-", "–": "-", "“": '"', "”": '"', "’": "'",
+        "‘": "'", "…": "...", "\u00A0": " ", "•": "-",
+        "→": "->",
+    }
+    for k, v in repl.items():
+        s = s.replace(k, v)
+
+    s = _break_long_tokens(s, 40)
+
+    try:
+        s = s.encode("latin-1", "ignore").decode("latin-1")
+    except Exception:
+        pass
+    return s
+
+
+def safe_multi_cell(pdf: FPDF, h: float, text: str, w: float = 0) -> None:
+    """
+    Multi-cell à prova de crash:
+    - reseta X para a margem esquerda
+    - quebra tokens longos
+    - fallback em chunk se o FPDF ainda reclamar
+    """
+    pdf.set_x(pdf.l_margin)
+    t = _pdf_safe(text)
+
+    try:
+        pdf.multi_cell(w, h, t)
+        return
+    except Exception:
+        pass
+
+    # fallback extremo: imprime em blocos curtos
+    pdf.set_x(pdf.l_margin)
+    chunk = 120
+    for i in range(0, len(t), chunk):
+        pdf.multi_cell(w, h, t[i:i+chunk])
+        pdf.set_x(pdf.l_margin)
