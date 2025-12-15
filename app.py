@@ -71,14 +71,8 @@ with st.form("eba_form"):
 
 
 if submitted:
-    st.write("SUBMIT ACIONADO")  # ← TEMPORÁRIO
-    print("SUBMIT ACIONADO")
-
-
-    texto = extract_text_from_pdf(uploaded_file)
-    if submitted:
-        if not uploaded_file or not cargo_input.strip():
-         st.error("Informe o cargo e envie o relatório.")
+    if not uploaded_file or not cargo_input.strip():
+        st.error("Informe o cargo e envie o relatório.")
         st.stop()
 
     texto = extract_text_from_pdf(uploaded_file)
@@ -86,42 +80,6 @@ if submitted:
         st.error("Não foi possível extrair texto do relatório.")
         st.stop()
 
-    def clamp_text(text: str, max_chars: int = 120_000) -> str:
-        text = text or ""
-        if len(text) <= max_chars:
-            return text
-        head = text[:80_000]
-        tail = text[-40_000:]
-        return head + "\n\n[CONTEÚDO TRUNCADO POR LIMITE DE API]\n\n" + tail
-
-    # 🔒 evita AxiosError 413 (payload grande)
-    texto = clamp_text(texto, 120_000)
-
-    empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
-    empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
-
-    tracker = UsageTracker(provider="groq", email=email_analista or "", empresa=empresa, cargo=cargo_input)
-
-    with st.spinner("Extraindo dados do relatório..."):
-        bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
-        if empresa:
-            bfa_data["empresa"] = empresa
-
-    with st.spinner("Analisando perfil comportamental..."):
-        analysis = run_analise(bfa_data=bfa_data, cargo=cargo_input, tracker=tracker)
-
-    with st.spinner("Gerando relatório PDF..."):
-        pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
-
-    pdf_bytes = pdf_buf.getvalue() if hasattr(pdf_buf, "getvalue") else bytes(pdf_buf)
-
-    st.session_state["analysis"] = analysis
-    st.session_state["bfa_data"] = bfa_data
-    st.session_state["pdf_bytes"] = pdf_bytes
-    st.session_state["cargo"] = cargo_input
-
-    send_usage_excel_if_configured(tracker, email_analista, cargo_input)
-    send_report_email_if_configured(tracker, email_analista, cargo_input, pdf_bytes)
     empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
     empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
 

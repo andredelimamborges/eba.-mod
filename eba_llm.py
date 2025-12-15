@@ -189,19 +189,18 @@ def get_llm_client_cached(provider: str, api_key: str):
 
 
 def get_api_key_for_provider(provider: str) -> str:
-    provider = (provider or "").lower()
-
-    if provider == "openai":
-        raise RuntimeError("OpenAI desativado neste ambiente. Use GROQ.")
-
+    provider = (provider or "groq").lower()
     if provider == "groq":
         key = st.secrets.get("GROQ_API_KEY", "")
         if not key:
-            raise RuntimeError("GROQ_API_KEY não configurada nos secrets.")
+            raise RuntimeError("GROQ_API_KEY não configurada nos secrets do streamlit.")
         return key
-
+    if provider == "openai":
+        key = st.secrets.get("OPENAI_API_KEY", "")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY não configurada nos secrets do streamlit.")
+        return key
     raise RuntimeError(f"provedor não suportado: {provider}")
-
 
 
 def _get_provider_and_model() -> Tuple[str, str]:
@@ -229,8 +228,8 @@ def _get_provider_and_model() -> Tuple[str, str]:
         pass
 
     # 3) fallback final
-    provider = "groq"
-    model_id = model_id or st.secrets.get("GROQ_MODEL_ID", "llama-3.3-70b-versatile")
+    provider = (provider or "groq").strip()
+    model_id = (model_id or "llama-3.1-8b-instant").strip()
     return provider, model_id
 
 
