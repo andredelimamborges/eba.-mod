@@ -23,9 +23,6 @@ from eba_utils import (
 from eba_llm import run_extracao, run_analise
 
 
-# =========================
-# HELPERS UI
-# =========================
 def interpretar_big_five(nome, valor):
     v = float(valor)
     if nome == "Neuroticismo":
@@ -57,22 +54,11 @@ def classificar_competencias(lista):
     return fortes, criticas
 
 
-# =========================
-# STREAMLIT CONFIG
-# =========================
-st.set_page_config(
-    page_title="Elder Brain Analytics",
-    page_icon="🧠",
-    layout="wide",
-)
-
+st.set_page_config(page_title="Elder Brain Analytics", page_icon="🧠", layout="wide")
 st.title("🧠 Elder Brain Analytics")
 st.caption("Avaliação comportamental avançada para tomada de decisão em RH")
 
 
-# =========================
-# FORM
-# =========================
 with st.form("eba_form"):
     col1, col2 = st.columns(2)
     with col1:
@@ -80,17 +66,10 @@ with st.form("eba_form"):
     with col2:
         cargo_input = st.text_input("Cargo Avaliado", placeholder="Ex: Engenheiro de Software Pleno")
 
-    uploaded_file = st.file_uploader(
-        "Upload do relatório BFA (PDF ou TXT)",
-        type=["pdf", "txt"],
-    )
-
+    uploaded_file = st.file_uploader("Upload do relatório BFA (PDF ou TXT)", type=["pdf", "txt"])
     submitted = st.form_submit_button("Processar Relatório")
 
 
-# =========================
-# PROCESSAMENTO
-# =========================
 if submitted:
     if not uploaded_file or not cargo_input.strip():
         st.error("Informe o cargo e envie o relatório.")
@@ -104,12 +83,7 @@ if submitted:
     empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
     empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
 
-    tracker = UsageTracker(
-        provider="groq",
-        email=email_analista or "",
-        empresa=empresa,
-        cargo=cargo_input,
-    )
+    tracker = UsageTracker(provider="groq", email=email_analista or "", empresa=empresa, cargo=cargo_input)
 
     with st.spinner("Extraindo dados do relatório..."):
         bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
@@ -120,31 +94,20 @@ if submitted:
     with st.spinner("Gerando relatório PDF..."):
         pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
 
-    # persistência segura
+    pdf_bytes = pdf_buf.getvalue() if hasattr(pdf_buf, "getvalue") else bytes(pdf_buf)
+
     st.session_state["analysis"] = analysis
     st.session_state["bfa_data"] = bfa_data
-    st.session_state["pdf_bytes"] = pdf_buf.getvalue()  # bytes puros (melhor pro download/email)
+    st.session_state["pdf_bytes"] = pdf_bytes
     st.session_state["cargo"] = cargo_input
 
-    # (opcional) envia planilha separada — mantido por compat
-    send_usage_excel_if_configured(
-        tracker=tracker,
-        email_analista=email_analista,
-        cargo=cargo_input,
-    )
+    # mantém compat (se você quiser desligar depois, ok)
+    send_usage_excel_if_configured(tracker, email_analista, cargo_input)
 
-    # ✅ envia PDF + XLSX no mesmo e-mail
-    send_report_email_if_configured(
-        tracker=tracker,
-        email_analista=email_analista,
-        cargo=cargo_input,
-        pdf_bytes=st.session_state["pdf_bytes"],
-    )
+    # ✅ envia PDF + XLSX
+    send_report_email_if_configured(tracker, email_analista, cargo_input, pdf_bytes)
 
 
-# =========================
-# DASHBOARD (SÓ SE HOUVER DADOS)
-# =========================
 if "analysis" in st.session_state and "bfa_data" in st.session_state:
     analysis = st.session_state.get("analysis") or {}
     bfa_data = st.session_state.get("bfa_data") or {}
@@ -160,46 +123,30 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     perfil = gerar_perfil_cargo_dinamico(cargo)
     traits_ideais = (perfil or {}).get("traits_ideais", {})
 
-    tabs = st.tabs([
-        "🎯 Perfil Big Five",
-        "💼 Competências",
-        "🧘 Saúde Emocional",
-        "📈 Desenvolvimento",
-        "📄 Dados Brutos",
-    ])
+    tabs = st.tabs(["🎯 Perfil Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados Brutos"])
 
-    # 🎯 BIG FIVE
     with tabs[0]:
         traits = bfa_data.get("traits_bfa", {}) or {}
         ordem = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
-
         st.subheader("🎯 Perfil Big Five — Interpretação")
         for k in ordem:
-            # compat com chaves sem acento
             v = traits.get(k)
             if v is None:
                 k2 = k.replace("ã", "a").replace("ç", "c").replace("õ", "o").replace("é", "e")
                 v = traits.get(k2)
             if v is not None:
                 st.write(f"• **{k} ({float(v):.1f}/10)**: {interpretar_big_five(k, v)}")
+        st.plotly_chart(criar_radar_bfa(traits, traits_ideais), use_container_width=True)
 
-        st.plotly_chart(
-            criar_radar_bfa(traits, traits_ideais),
-            use_container_width=True,
-        )
-
-    # 💼 COMPETÊNCIAS
     with tabs[1]:
         competencias = bfa_data.get("competencias_ms", []) or []
         fortes, criticas = classificar_competencias(competencias)
 
         st.subheader("💼 Competências — Leitura Geral")
-
         if fortes:
             st.markdown("🔹 **Pontos de Força**")
             for f in fortes:
                 st.write(f"• {f} — desempenho consistente para o cargo.")
-
         if criticas:
             st.markdown("🔸 **Pontos Críticos**")
             for c in criticas:
@@ -209,10 +156,8 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
         if fig_comp:
             st.plotly_chart(fig_comp, use_container_width=True)
 
-    # 🧘 SAÚDE EMOCIONAL
     with tabs[2]:
         saude = bfa_data.get("indicadores_saude_emocional", {}) or {}
-
         st.subheader("🧘 Saúde Emocional — Justificativa Completa")
         for k, v in saude.items():
             if v is not None:
@@ -223,15 +168,10 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
             st.markdown("**Contextualização da IA**")
             st.write(contexto)
 
-        st.plotly_chart(
-            criar_gauge_fit((analysis or {}).get("compatibilidade_geral", 0)),
-            use_container_width=True,
-        )
+        st.plotly_chart(criar_gauge_fit((analysis or {}).get("compatibilidade_geral", 0)), use_container_width=True)
 
-    # 📈 DESENVOLVIMENTO
     with tabs[3]:
         st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
-
         for i, rec in enumerate((analysis or {}).get("recomendacoes_desenvolvimento", []) or [], 1):
             st.write(f"{i}. {rec}")
 
@@ -246,12 +186,10 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
             for c in cargos_alt:
                 st.write(f"• **{c.get('cargo')}** — {c.get('justificativa')}")
 
-    # 📄 DADOS BRUTOS
     with tabs[4]:
         st.json(bfa_data)
 
-    # DOWNLOAD FORA DAS TABS
-    if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"]:
+    if st.session_state.get("pdf_bytes"):
         st.download_button(
             "📄 Baixar Relatório em PDF",
             data=st.session_state["pdf_bytes"],
