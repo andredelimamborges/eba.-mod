@@ -6,6 +6,13 @@ from datetime import datetime
 
 import streamlit as st
 
+from eba_reports import (
+    criar_radar_bfa,
+    criar_grafico_competencias,
+    criar_gauge_fit,
+)
+from eba_config import gerar_perfil_cargo_dinamico
+
 from eba_utils import (
     extract_text_from_pdf,
     limpar_nome_empresa,
@@ -15,6 +22,32 @@ from eba_utils import (
 from eba_llm import run_extracao, run_analise
 from eba_reports import gerar_pdf_corporativo
 
+def interpretar_big_five(nome, valor):
+    v = float(valor)
+    if nome == "Neuroticismo":
+        if v <= 4.5:
+            return "nível saudável → boa regulação emocional."
+        elif v <= 6:
+            return "nível moderado → atenção situacional."
+        return "nível elevado → risco emocional."
+
+    if v < 4.5:
+        return "nível baixo → ponto de desenvolvimento."
+    elif v < 6.5:
+        return "nível moderado → equilíbrio natural."
+    return "nível alto → força clara nesse traço."
+
+
+def classificar_competencias(lista):
+    fortes, criticas = [], []
+    for c in lista:
+        nota = float(c.get("nota", 0))
+        nome = c.get("nome", "")
+        if nota >= 55:
+            fortes.append(nome)
+        elif nota < 45:
+            criticas.append(nome)
+    return fortes, criticas
 
 # =========================
 # STREAMLIT CONFIG
@@ -100,59 +133,98 @@ if "analysis" in st.session_state:
     bfa_data = st.session_state["bfa_data"]
 
     st.divider()
-    st.header("📊 Dashboard Analítico")
+st.header("📊 Dashboard Analítico — Elder Brain")
 
-    tabs = st.tabs([
-        "🎯 Big Five",
-        "💼 Competências",
-        "🧘 Saúde Emocional",
-        "📈 Desenvolvimento",
-        "📄 Dados Brutos",
-    ])
+perfil = gerar_perfil_cargo_dinamico(cargo)
+traits_ideais = perfil.get("traits_ideais", {})
 
-    # 🎯 Big Five
-    with tabs[0]:
-        traits = bfa_data.get("traits_bfa", {})
-        for k, v in traits.items():
-            if v is not None:
-                st.metric(k, f"{float(v):.1f}/10")
+tabs = st.tabs([
+    "🎯 Perfil Big Five",
+    "💼 Competências",
+    "🧘 Saúde Emocional",
+    "📈 Desenvolvimento",
+    "📄 Dados Brutos",
+])
 
-    # 💼 Competências
-    with tabs[1]:
-        for c in bfa_data.get("competencias_ms", []):
-            st.write(f"**{c.get('nome')}** — Nota: {c.get('nota')} ({c.get('classificacao')})")
+# 🎯 BIG FIVE
+with tabs[0]:
+    traits = bfa_data.get("traits_bfa", {})
 
-    # 🧘 Saúde Emocional
-    with tabs[2]:
-        saude = bfa_data.get("indicadores_saude_emocional", {})
-        for k, v in saude.items():
-            if v is not None:
-                st.metric(k.replace("_", " ").capitalize(), f"{int(v)} / 100")
+    st.subheader("🎯 Perfil Big Five — Interpretação")
+    for k, v in traits.items():
+        if v is not None:
+            st.write(f"• **{k} ({float(v):.1f}/10)**: {interpretar_big_five(k, v)}")
 
-    # 📈 Desenvolvimento
-    with tabs[3]:
-        st.subheader("Pontos Fortes")
-        for p in bfa_data.get("pontos_fortes", []):
-            st.write(f"• {p}")
+    st.plotly_chart(
+        criar_radar_bfa(traits, traits_ideais),
+        use_container_width=True,
+    )
 
-        st.subheader("Pontos de Atenção")
-        for p in bfa_data.get("pontos_atencao", []):
-            st.write(f"• {p}")
 
-        st.subheader("Recomendações")
-        for r in analysis.get("recomendacoes_desenvolvimento", []):
-            st.write(f"• {r}")
+# 💼 COMPETÊNCIAS
+with tabs[1]:
+    competencias = bfa_data.get("competencias_ms", [])
+    fortes, criticas = classificar_competencias(competencias)
 
-        st.subheader("Cargos Alternativos")
-        for c in analysis.get("cargos_alternativos", []):
+    st.subheader("💼 Competências — Leitura Geral")
+
+    if fortes:
+        st.markdown("🔹 **Pontos de Força**")
+        for f in fortes:
+            st.write(f"• {f} — desempenho consistente para o cargo.")
+
+    if criticas:
+        st.markdown("🔸 **Pontos Críticos**")
+        for c in criticas:
+            st.write(f"• {c} — requer acompanhamento e plano de desenvolvimento.")
+
+    fig_comp = criar_grafico_competencias(competencias)
+    if fig_comp:
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+
+# 🧘 SAÚDE EMOCIONAL
+with tabs[2]:
+    saude = bfa_data.get("indicadores_saude_emocional", {})
+
+    st.subheader("🧘 Saúde Emocional — Justificativa Completa")
+    for k, v in saude.items():
+        if v is not None:
+            st.write(f"• **{k.replace('_',' ').capitalize()}**: {int(v)}/100 → nível saudável, dentro do esperado.")
+
+    contexto = analysis.get("saude_emocional_contexto", "")
+    if contexto:
+        st.markdown("**Contextualização da IA**")
+        st.write(contexto)
+
+    st.plotly_chart(
+        criar_gauge_fit(analysis.get("compatibilidade_geral", 0)),
+        use_container_width=True,
+    )
+
+
+# 📈 DESENVOLVIMENTO
+with tabs[3]:
+    st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
+
+    for i, rec in enumerate(analysis.get("recomendacoes_desenvolvimento", []), 1):
+        st.write(f"{i}. {rec}")
+
+    st.markdown("**Sugestões Adicionais (Elder Brain)**")
+    st.write("• Treinamentos recomendados: Inteligência Emocional, Comunicação Assertiva, Gestão de Conflitos.")
+    st.write("• Rotina sugerida: feedback quinzenal estruturado com liderança.")
+    st.write("• Foco de curto prazo: trabalhar competências críticas e traços ligados à resiliência.")
+
+    cargos_alt = analysis.get("cargos_alternativos", [])
+    if cargos_alt:
+        st.markdown("**Cargos Alternativos Sugeridos**")
+        for c in cargos_alt:
             st.write(f"• **{c.get('cargo')}** — {c.get('justificativa')}")
 
-    # 📄 Dados Brutos
-    with tabs[4]:
-        st.json(bfa_data)
 
-    st.divider()
-
+# 📄 DADOS BRUTOS
+with tabs[4]:
+    st.json(bfa_data)
     st.download_button(
         "📄 Baixar Relatório em PDF",
         data=st.session_state["pdf_bytes"],
