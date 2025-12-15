@@ -1,8 +1,8 @@
 # eba_reports.py
 from __future__ import annotations
 
-import os
 import io
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -10,13 +10,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
-from fpdf import FPDF
 import streamlit as st
+from fpdf import FPDF
 
-from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
+from eba_config import APP_NAME, APP_TAGLINE, APP_VERSION
 
 # =========================
-# PALETA MAIS FORMAL (corporativa)
+# PALETA CORPORATIVA
 # =========================
 COLOR_PRIMARY = "#2C109C"  # roxo oficial
 COLOR_TEXT = "#1F1F1F"
@@ -25,7 +25,7 @@ COLOR_BORDER = "#D1D5DB"
 
 # gráficos
 COLOR_CANDIDATO = "#2C109C"
-COLOR_IDEAL_LINE = "#15803D"  # verde escuro formal
+COLOR_IDEAL_LINE = "#15803D"  # verde escuro
 COLOR_IDEAL_FILL_MAX = "rgba(21, 128, 61, 0.18)"
 COLOR_IDEAL_FILL_MIN = "rgba(21, 128, 61, 0.08)"
 
@@ -34,16 +34,17 @@ COLOR_GOOD = "#15803D"  # verde escuro
 COLOR_BAD = "#B91C1C"   # vermelho escuro
 
 # export de imagens plotly
-# PROD NOTE: imagens grandes + escala alta podem estourar a área útil do A4
-# e acabar "cortando" no PDF (principalmente em páginas com pouco espaço restante).
-# Mantemos boa qualidade, mas reduzimos um pouco a área/escala para caber com folga.
 PLOT_EXPORT_W = 1000
 PLOT_EXPORT_H = 680
 PLOT_EXPORT_SCALE = 1
 
+FOOTER_TEXT = (
+    "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas. "
+    "O Elder Brain Analytics atua como um braço direito analítico de suporte."
+)
 
 # =========================
-# GRÁFICOS
+# HELPERS
 # =========================
 def _norm_key(k: str) -> str:
     return (
@@ -56,6 +57,17 @@ def _norm_key(k: str) -> str:
     )
 
 
+def _safe_remove_file(p: Optional[str]) -> None:
+    if p and os.path.exists(p):
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+
+
+# =========================
+# GRÁFICOS (PLOTLY)
+# =========================
 def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
@@ -74,7 +86,6 @@ def criar_radar_bfa(
 
     fig = go.Figure()
 
-    # candidato
     fig.add_trace(
         go.Scatterpolar(
             r=vals,
@@ -133,11 +144,9 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
     if df.empty or "nota" not in df.columns or "nome" not in df.columns:
         return None
 
-    # ordena e limita
     df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
     df = df.sort_values("nota", ascending=True).tail(15)
 
-    # cor por faixa
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
         for n in df["nota"].tolist()
@@ -182,7 +191,11 @@ def criar_gauge_fit(fit_score: float) -> go.Figure:
                     {"range": [40, 70], "color": "rgba(180, 83, 9, 0.22)"},
                     {"range": [70, 100], "color": "rgba(21, 128, 61, 0.20)"},
                 ],
-                "threshold": {"line": {"color": "#111827", "width": 4}, "thickness": 0.75, "value": 70},
+                "threshold": {
+                    "line": {"color": "#111827", "width": 4},
+                    "thickness": 0.75,
+                    "value": 70,
+                },
             },
         )
     )
@@ -197,12 +210,12 @@ def fig_to_png_path(
     scale: int = PLOT_EXPORT_SCALE,
 ) -> Optional[str]:
     """
-    exporta figura plotly para png e retorna path temporário.
+    Exporta figura plotly para PNG e retorna path temporário.
 
-    correção prod:
-    - usa export por bytes (pio.to_image / fig.to_image) e só depois escreve no disco
-    - força engine='kaleido' quando disponível
-    - mostra o erro real no streamlit (antes era silencioso)
+    PROD SAFE:
+    - tenta configurar o chromium/chrome para o kaleido (necessário no streamlit.app)
+    - exporta por bytes (pio.to_image / fig.to_image) e só então escreve no disco
+    - warnings com erro real (não silencioso)
     """
     try:
         import plotly.io as pio
@@ -213,17 +226,32 @@ def fig_to_png_path(
             pass
         return None
 
-    # tenta garantir que kaleido existe (mensagem mais útil)
+    # tenta garantir que kaleido existe
     try:
         import kaleido  # noqa: F401
         has_kaleido = True
     except Exception:
         has_kaleido = False
 
+    # 🔥 correção do teu log: "Kaleido requires Google Chrome"
+    # tenta apontar o executável do chromium/chrome (linux/streamlit cloud/vps)
+    try:
+        candidates = [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                pio.kaleido.scope.chromium_executable = c
+                break
+    except Exception:
+        pass
+
     img_bytes: Optional[bytes] = None
     err_msgs: List[str] = []
 
-    # 1) caminho preferido: pio.to_image (bytes)
     try:
         img_bytes = pio.to_image(
             fig,
@@ -236,7 +264,6 @@ def fig_to_png_path(
     except Exception as e:
         err_msgs.append(f"pio.to_image falhou: {e}")
 
-    # 2) fallback: fig.to_image (bytes)
     if img_bytes is None:
         try:
             img_bytes = fig.to_image(
@@ -250,7 +277,6 @@ def fig_to_png_path(
             err_msgs.append(f"fig.to_image falhou: {e}")
 
     if not img_bytes:
-        # aviso explícito (antes era silencioso)
         try:
             base = "falha ao exportar gráfico para png."
             if not has_kaleido:
@@ -260,7 +286,6 @@ def fig_to_png_path(
             pass
         return None
 
-    # escreve bytes em arquivo temporário
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             tmp.write(img_bytes)
@@ -274,7 +299,7 @@ def fig_to_png_path(
 
 
 # =========================
-# FONTE
+# FONTE (Montserrat)
 # =========================
 def _download_font(dst: str, url: str) -> bool:
     try:
@@ -317,12 +342,6 @@ def _register_montserrat(pdf: FPDF) -> bool:
 # =========================
 # PDF ENGINE
 # =========================
-FOOTER_TEXT = (
-    "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas. "
-    "O Elden Brain atua como um braço direito analítico de suporte."
-)
-
-
 class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -430,7 +449,6 @@ class PDFReport(FPDF):
 
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
-
         self.set_fill_color(44, 16, 156)
         self.rect(0, 0, self.w, 26, "F")
 
@@ -459,7 +477,7 @@ class PDFReport(FPDF):
 
 
 # =========================
-# LAYOUT HELPERS
+# LAYOUT HELPERS (IMAGEM)
 # =========================
 def _centered_image(
     pdf: PDFReport,
@@ -468,13 +486,6 @@ def _centered_image(
     space_after: float = 3.0,
     top_padding_mm: float = 2.0,
 ) -> None:
-    """
-    Insere imagem centralizada respeitando a área útil da página.
-
-    Correção PROD (PDF cortando gráficos): o FPDF não "reserva" espaço automaticamente
-    para imagens antes de desenhá-las, então precisamos estimar a altura e paginar
-    quando não houver espaço suficiente.
-    """
     if not image_path or not os.path.exists(image_path):
         return
 
@@ -485,7 +496,7 @@ def _centered_image(
     # estima altura do PNG em mm
     h_mm_est: Optional[float] = None
     try:
-        from PIL import Image  # pillow (recomendado para prod)
+        from PIL import Image
         with Image.open(image_path) as im:
             px_w, px_h = im.size
         if px_w > 0:
@@ -493,7 +504,6 @@ def _centered_image(
     except Exception:
         h_mm_est = None
 
-    # fallback conservador
     if h_mm_est is None:
         h_mm_est = 70.0
 
@@ -512,16 +522,8 @@ def _centered_image(
         pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
 
 
-def _safe_remove_file(p: Optional[str]) -> None:
-    if p and os.path.exists(p):
-        try:
-            os.remove(p)
-        except Exception:
-            pass
-
-
 # =========================
-# RESUMOS DOS GRÁFICOS (sem LLM)
+# RESUMOS (SEM LLM)
 # =========================
 def _summarize_radar(traits: Dict[str, Any], traits_ideais: Optional[Dict[str, Tuple[float, float]]]) -> str:
     labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
@@ -592,13 +594,10 @@ def gerar_pdf_corporativo(
     analysis: Dict[str, Any],
     cargo: str,
     save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,  # mantido por compatibilidade (não usado)
+    logo_path: Optional[str] = None,  # mantido por compatibilidade
 ) -> io.BytesIO:
     """
-    Gera o PDF corporativo premium (sem logo).
-    - imagens dimensionadas e centralizadas
-    - sem páginas em branco desnecessárias
-    - rodapé fixo via footer()
+    Gera o PDF corporativo premium.
     """
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
@@ -614,13 +613,17 @@ def gerar_pdf_corporativo(
         # CAPA
         pdf.cover("Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
 
-        # DADOS
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
 
+        # ✅ empresa: vem do app (injeta em bfa_data["empresa"]) ou de outras integrações
+        empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
+
         # 1
         pdf.heading("1. Informações do Candidato")
+        empresa_line = f"Empresa: {empresa_pdf}\n" if empresa_pdf else ""
         pdf.paragraph(
+            f"{empresa_line}"
             f"Nome: {nome}\n"
             f"Cargo Avaliado: {cargo}\n"
             f"Data da Análise: {datetime.now():%d/%m/%Y %H:%M}",
@@ -692,7 +695,6 @@ def gerar_pdf_corporativo(
 
         # 5 - GRÁFICOS
         pdf.heading("5. Visualizações (Gráficos)")
-
         from eba_config import gerar_perfil_cargo_dinamico
         perfil = gerar_perfil_cargo_dinamico(cargo)
         traits_ideais = (perfil or {}).get("traits_ideais", {}) or None
@@ -701,41 +703,54 @@ def gerar_pdf_corporativo(
         comp_fig = criar_grafico_competencias((bfa_data or {}).get("competencias_ms", []) or [])
         gauge_fig = criar_gauge_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0))
 
-        # SAFE: inicializa paths (evita variável inexistente no cleanup)
+        # SAFE: inicializa paths
         p_radar: Optional[str] = None
         p_comp: Optional[str] = None
         p_fit: Optional[str] = None
 
-        # radar (reduzido para evitar corte)
         p_radar = fig_to_png_path(radar_fig)
         if p_radar:
             _centered_image(pdf, p_radar, max_width_mm=145, space_after=2.0)
             pdf.paragraph(_summarize_radar(traits, traits_ideais), size=9, gap=1.0)
             pdf.divider(1.5)
         else:
-            pdf.paragraph("ATENÇÃO: não foi possível exportar o radar. Verifique o kaleido para embutir gráficos no PDF.", size=9, gap=1.0)
+            pdf.paragraph(
+                "ATENÇÃO: não foi possível exportar o radar para PNG. "
+                "No streamlit.app, adicione 'chromium' em packages.txt.",
+                size=9,
+                gap=1.0,
+            )
 
-        # competências (reduzido e com margem extra)
         if comp_fig:
             p_comp = fig_to_png_path(comp_fig)
             if p_comp:
                 _centered_image(pdf, p_comp, max_width_mm=155, space_after=2.0, top_padding_mm=3.0)
-                pdf.paragraph(_summarize_competencias((bfa_data or {}).get("competencias_ms", []) or []), size=9, gap=1.0)
+                pdf.paragraph(
+                    _summarize_competencias((bfa_data or {}).get("competencias_ms", []) or []),
+                    size=9,
+                    gap=1.0,
+                )
                 pdf.divider(1.5)
             else:
-                pdf.paragraph("ATENÇÃO: falha ao exportar gráfico de competências (kaleido).", size=9, gap=1.0)
+                pdf.paragraph(
+                    "ATENÇÃO: falha ao exportar gráfico de competências para PNG (kaleido/chromium).",
+                    size=9,
+                    gap=1.0,
+                )
         else:
             pdf.paragraph("Sem competências estruturadas para exibição.", size=9, gap=1.0)
 
-        # gauge fit (reduzido)
         p_fit = fig_to_png_path(gauge_fig)
         if p_fit:
             _centered_image(pdf, p_fit, max_width_mm=115, space_after=2.0)
             pdf.paragraph(_summarize_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0)), size=9, gap=1.0)
         else:
-            pdf.paragraph("ATENÇÃO: falha ao exportar gráfico de Fit (kaleido).", size=9, gap=1.0)
+            pdf.paragraph(
+                "ATENÇÃO: falha ao exportar gráfico de Fit para PNG (kaleido/chromium).",
+                size=9,
+                gap=1.0,
+            )
 
-        # cleanup limpo e seguro
         _safe_remove_file(p_radar)
         _safe_remove_file(p_comp)
         _safe_remove_file(p_fit)
@@ -763,7 +778,7 @@ def gerar_pdf_corporativo(
 
         pdf.divider(2.0)
 
-        # 7 e 8
+        # 7
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
         if pf:
             pdf.heading("7. Pontos Fortes")
@@ -772,6 +787,7 @@ def gerar_pdf_corporativo(
                     pdf.paragraph(f"- {item}", size=10, gap=0.6)
             pdf.divider(1.5)
 
+        # 8
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
         if pa:
             pdf.heading("8. Pontos de Atenção")
@@ -780,7 +796,7 @@ def gerar_pdf_corporativo(
                     pdf.paragraph(f"- {item}", size=10, gap=0.6)
             pdf.divider(1.5)
 
-        # 9 e 10
+        # 9
         pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         if recs:
@@ -794,6 +810,7 @@ def gerar_pdf_corporativo(
         else:
             pdf.paragraph("Não foram encontradas recomendações estruturadas.", size=10, gap=1.0)
 
+        # 10
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
             pdf.divider(2.0)

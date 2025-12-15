@@ -87,7 +87,8 @@ if submitted:
 
     with st.spinner("Extraindo dados do relatório..."):
         bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
-
+        if empresa:
+            bfa_data["empresa"] = empresa
     with st.spinner("Analisando perfil comportamental..."):
         analysis = run_analise(bfa_data=bfa_data, cargo=cargo_input, tracker=tracker)
 
