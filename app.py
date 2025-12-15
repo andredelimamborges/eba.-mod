@@ -71,9 +71,9 @@ with st.form("eba_form"):
 
 
 if submitted:
-    if not uploaded_file or not cargo_input.strip():
-        st.error("Informe o cargo e envie o relatório.")
-        st.stop()
+    st.write("SUBMIT ACIONADO")  # ← TEMPORÁRIO
+    print("SUBMIT ACIONADO")
+
 
     texto = extract_text_from_pdf(uploaded_file)
     if submitted:
