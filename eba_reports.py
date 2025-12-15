@@ -6,9 +6,16 @@ import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
+import plotly.graph_objects as go
 from fpdf import FPDF
 
 from eba_config import APP_NAME, APP_VERSION
+
+
+PRIMARY = "#2C109C"
+GOOD = "#15803D"
+WARN = "#B45309"
+BAD = "#B91C1C"
 
 
 # =========================
@@ -18,6 +25,7 @@ def _pdf_safe(text: str) -> str:
     if text is None:
         return ""
     s = str(text)
+
     repl = {
         "—": "-", "–": "-", "“": '"', "”": '"', "’": "'",
         "‘": "'", "…": "...", "\u00A0": " ", "•": "-",
@@ -25,6 +33,14 @@ def _pdf_safe(text: str) -> str:
     }
     for k, v in repl.items():
         s = s.replace(k, v)
+
+    def break_long_tokens(t: str, max_len: int = 80) -> str:
+        def _split(m):
+            w = m.group(0)
+            return " ".join(w[i:i+max_len] for i in range(0, len(w), max_len))
+        return re.sub(rf"\S{{{max_len},}}", _split, t)
+
+    s = break_long_tokens(s, 80)
 
     try:
         s = s.encode("latin-1", "ignore").decode("latin-1")
@@ -34,7 +50,120 @@ def _pdf_safe(text: str) -> str:
 
 
 # =========================
-# PDF ENGINE
+# GRÁFICOS (UI - Plotly)
+# =========================
+def criar_radar_bfa(
+    traits: Dict[str, Any],
+    traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None
+) -> go.Figure:
+    labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
+
+    def _get(trait: str) -> float:
+        v = traits.get(trait)
+        if v is None:
+            # fallback sem acento
+            k2 = trait.replace("ã", "a").replace("ç", "c").replace("õ", "o").replace("é", "e")
+            v = traits.get(k2, 0)
+        try:
+            return float(v or 0)
+        except Exception:
+            return 0.0
+
+    values = [_get(k) for k in labels]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=values,
+        theta=labels,
+        fill="toself",
+        name="Candidato",
+        line=dict(color=PRIMARY, width=3),
+        fillcolor="rgba(44, 16, 156, 0.12)",
+    ))
+
+    if traits_ideais:
+        vmax = [float(traits_ideais.get(k, (0, 10))[1]) for k in labels]
+        vmin = [float(traits_ideais.get(k, (0, 10))[0]) for k in labels]
+
+        fig.add_trace(go.Scatterpolar(
+            r=vmax,
+            theta=labels,
+            name="Ideal Máx",
+            line=dict(color=GOOD, dash="dash", width=2),
+        ))
+        fig.add_trace(go.Scatterpolar(
+            r=vmin,
+            theta=labels,
+            name="Ideal Mín",
+            line=dict(color=GOOD, dash="dash", width=2),
+        ))
+
+    fig.update_layout(
+        title="Big Five x Perfil Ideal",
+        polar=dict(radialaxis=dict(range=[0, 10])),
+        showlegend=True,
+        height=520,
+        margin=dict(l=40, r=40, t=70, b=30),
+        legend=dict(orientation="h", y=-0.15),
+    )
+    return fig
+
+
+def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[go.Figure]:
+    if not competencias:
+        return None
+
+    nomes = [str(c.get("nome", "")) for c in competencias]
+    notas: List[float] = []
+    for c in competencias:
+        try:
+            notas.append(float(c.get("nota", 0) or 0))
+        except Exception:
+            notas.append(0.0)
+
+    cores = [BAD if n < 45 else WARN if n < 55 else GOOD for n in notas]
+
+    fig = go.Figure(go.Bar(
+        x=notas,
+        y=nomes,
+        orientation="h",
+        marker_color=cores,
+        text=[f"{n:.0f}" for n in notas],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="Competências (Barras)",
+        height=620,
+        margin=dict(l=180, r=40, t=70, b=30),
+        showlegend=False,
+    )
+    fig.add_vline(x=45, line_dash="dash", line_color=WARN)
+    fig.add_vline(x=55, line_dash="dash", line_color=GOOD)
+    return fig
+
+
+def criar_gauge_fit(valor: float) -> go.Figure:
+    v = float(valor or 0)
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=v,
+        title={"text": "Fit para o Cargo"},
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": PRIMARY},
+            "steps": [
+                {"range": [0, 40], "color": "rgba(185, 28, 28, 0.25)"},
+                {"range": [40, 70], "color": "rgba(180, 83, 9, 0.22)"},
+                {"range": [70, 100], "color": "rgba(21, 128, 61, 0.20)"},
+            ],
+        },
+    ))
+    fig.update_layout(height=420, margin=dict(l=40, r=40, t=70, b=30))
+    return fig
+
+
+# =========================
+# PDF (SEM KALEIDO / SEM CHROME)
 # =========================
 class PDFReport(FPDF):
     def __init__(self):
@@ -48,25 +177,15 @@ class PDFReport(FPDF):
         self.cell(0, 8, _pdf_safe(f"Página {self.page_no()}"), align="C")
 
 
-# =========================
-# TEXT HELPERS
-# =========================
-def _fmt_list(items: List[str]) -> str:
-    return "\n".join(f"- {i}" for i in items if i)
-
-
-# =========================
-# PDF PRINCIPAL
-# =========================
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
     cargo: str,
 ) -> io.BytesIO:
     pdf = PDFReport()
-    pdf.add_page()
 
-    # CAPA
+    # CAPA (sem página em branco)
+    pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
     pdf.cell(0, 15, _pdf_safe("Relatório Comportamental"), ln=1, align="C")
     pdf.set_font("Helvetica", "", 12)
@@ -76,102 +195,104 @@ def gerar_pdf_corporativo(
     pdf.cell(0, 6, _pdf_safe(f"{APP_NAME} {APP_VERSION}"), ln=1, align="C")
     pdf.cell(0, 6, _pdf_safe(f"{datetime.now():%d/%m/%Y %H:%M}"), ln=1, align="C")
 
+    # conteúdo (textual)
     pdf.add_page()
 
-    # =========================
-    # BIG FIVE
-    # =========================
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, _pdf_safe("Perfil Big Five — Interpretação"), ln=1)
+    # decisão / fit
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, _pdf_safe("Decisão e Compatibilidade"), ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    decisao = (analysis or {}).get("decisao", "N/A")
+    comp = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
+    pdf.multi_cell(0, 6.5, _pdf_safe(f"Decisão: {decisao}\nCompatibilidade: {comp:.0f}%"))
+    pdf.ln(2)
 
-    traits = bfa_data.get("traits_bfa", {}) or {}
+    # resumo executivo
+    resumo = (analysis or {}).get("resumo_executivo", "")
+    if resumo:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.cell(0, 9, _pdf_safe("Resumo Executivo"), ln=1)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe(resumo))
+        pdf.ln(2)
+
+    # big five
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, _pdf_safe("Perfil Big Five"), ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    traits = (bfa_data or {}).get("traits_bfa", {}) or {}
     for k, v in traits.items():
         try:
-            pdf.set_font("Helvetica", "", 11)
-            pdf.multi_cell(
-                0, 7,
-                _pdf_safe(f"{k}: {float(v):.1f}/10"),
-            )
+            pdf.multi_cell(0, 6.5, _pdf_safe(f"{k}: {float(v):.1f}/10"))
         except Exception:
-            pass
+            continue
+    pdf.ln(1)
 
-    pdf.ln(3)
-
-    # =========================
-    # COMPETÊNCIAS
-    # =========================
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, _pdf_safe("Competências — Leitura Geral"), ln=1)
-
-    fortes = []
-    criticas = []
-    for c in bfa_data.get("competencias_ms", []) or []:
+    # competências
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, _pdf_safe("Competências"), ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    competencias = (bfa_data or {}).get("competencias_ms", []) or []
+    fortes, criticas = [], []
+    for c in competencias:
         try:
-            nota = float(c.get("nota", 0))
-            nome = c.get("nome", "")
-            if nota >= 55:
-                fortes.append(nome)
-            elif nota < 45:
-                criticas.append(nome)
+            nota = float(c.get("nota", 0) or 0)
+            nome = str(c.get("nome", ""))
+        except Exception:
+            continue
+        if nota >= 55:
+            fortes.append(nome)
+        elif nota < 45:
+            criticas.append(nome)
+
+    if fortes:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe("Pontos de Força:"))
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe("\n".join(f"- {x}" for x in fortes)))
+
+    if criticas:
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe("Pontos Críticos:"))
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe("\n".join(f"- {x}" for x in criticas)))
+
+    # saúde emocional
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, _pdf_safe("Saúde Emocional"), ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    saude = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
+    for k, v in saude.items():
+        try:
+            pdf.multi_cell(0, 6.5, _pdf_safe(f"{k.replace('_',' ').capitalize()}: {int(v)}/100"))
         except Exception:
             continue
 
-    if fortes:
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe("Pontos de Força"), ln=1)
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 7, _pdf_safe(_fmt_list(fortes)))
+    contexto = (analysis or {}).get("saude_emocional_contexto", "")
+    if contexto:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "I", 11)
+        pdf.multi_cell(0, 6.5, _pdf_safe(contexto))
 
-    if criticas:
+    # desenvolvimento
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, _pdf_safe("Recomendações de Desenvolvimento"), ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
+    for i, r in enumerate(recs, 1):
+        pdf.multi_cell(0, 6.5, _pdf_safe(f"{i}. {r}"))
+
+    cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
+    if cargos_alt:
         pdf.ln(2)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe("Pontos Críticos"), ln=1)
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 7, _pdf_safe(_fmt_list(criticas)))
-
-    pdf.add_page()
-
-    # =========================
-    # SAÚDE EMOCIONAL
-    # =========================
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, _pdf_safe("Saúde Emocional — Justificativa"), ln=1)
-
-    for k, v in (bfa_data.get("indicadores_saude_emocional", {}) or {}).items():
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(
-            0, 7,
-            _pdf_safe(f"{k.replace('_',' ').capitalize()}: {int(v)}/100"),
-        )
-
-    contexto = analysis.get("saude_emocional_contexto", "")
-    if contexto:
-        pdf.ln(3)
-        pdf.set_font("Helvetica", "I", 11)
-        pdf.multi_cell(0, 7, _pdf_safe(contexto))
-
-    pdf.add_page()
-
-    # =========================
-    # DESENVOLVIMENTO
-    # =========================
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, _pdf_safe("Recomendações de Desenvolvimento"), ln=1)
-
-    recs = analysis.get("recomendacoes_desenvolvimento", []) or []
-    if recs:
-        pdf.set_font("Helvetica", "", 11)
-        for i, r in enumerate(recs, 1):
-            pdf.multi_cell(0, 7, _pdf_safe(f"{i}. {r}"))
-
-    cargos_alt = analysis.get("cargos_alternativos", []) or []
-    if cargos_alt:
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe("Cargos Alternativos Sugeridos"), ln=1)
+        pdf.cell(0, 8, _pdf_safe("Cargos Alternativos"), ln=1)
         pdf.set_font("Helvetica", "", 11)
         for c in cargos_alt:
-            pdf.multi_cell(0, 7, _pdf_safe(f"- {c.get('cargo')}: {c.get('justificativa')}"))
+            pdf.multi_cell(0, 6.5, _pdf_safe(f"- {c.get('cargo')}: {c.get('justificativa')}"))
 
     out = pdf.output(dest="S")
     if isinstance(out, str):
