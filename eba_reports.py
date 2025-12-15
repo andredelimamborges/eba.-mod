@@ -1,7 +1,8 @@
+# eba_reports.py
 from __future__ import annotations
 
-import io
 import os
+import io
 import re
 import tempfile
 from datetime import datetime
@@ -10,43 +11,58 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
+import streamlit as st
 
-from eba_config import gerar_perfil_cargo_dinamico, APP_VERSION
-
-# =========================
-# Cores
-# =========================
-# para FPDF (tuplas RGB)
-COLOR_PRIMARY = (84, 66, 142)   # roxo
-COLOR_HEADER_BG = (235, 237, 240)
-
-# para Plotly (strings)
-COLOR_OK_HEX = "#2ECC71"
-COLOR_WARN_HEX = "#F39C12"
-COLOR_BAD_HEX = "#E74C3C"
-
-COLOR_CANDIDATO = "#60519b"
-COLOR_IDEAL_MAX = "rgba(46, 213, 115, 0.35)"
-COLOR_IDEAL_MIN = "rgba(46, 213, 115, 0.15)"
-
+from eba_config import APP_NAME, APP_VERSION, APP_TAGLINE
 
 # =========================
-# Helpers gráficos
+# PALETA MAIS FORMAL (corporativa)
 # =========================
+COLOR_PRIMARY = "#2C109C"  # roxo oficial
+COLOR_TEXT = "#1F1F1F"
+COLOR_MUTED = "#6B7280"
+COLOR_BORDER = "#D1D5DB"
+
+# gráficos
+COLOR_CANDIDATO = "#2C109C"
+COLOR_IDEAL_LINE = "#15803D"  # verde escuro formal
+COLOR_IDEAL_FILL_MAX = "rgba(21, 128, 61, 0.18)"
+COLOR_IDEAL_FILL_MIN = "rgba(21, 128, 61, 0.08)"
+
+COLOR_WARN = "#B45309"  # âmbar escuro
+COLOR_GOOD = "#15803D"  # verde escuro
+COLOR_BAD = "#B91C1C"   # vermelho escuro
+
+# export de imagens plotly
+PLOT_EXPORT_W = 1200
+PLOT_EXPORT_H = 820
+PLOT_EXPORT_SCALE = 2
+
+
+# =========================
+# GRÁFICOS
+# =========================
+def _norm_key(k: str) -> str:
+    return (
+        k.replace("ã", "a")
+        .replace("ç", "c")
+        .replace("õ", "o")
+        .replace("é", "e")
+        .replace("ó", "o")
+        .replace("ê", "e")
+    )
+
 def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> go.Figure:
-    labels = [
-        "Abertura",
-        "Conscienciosidade",
-        "Extroversao",
-        "Amabilidade",
-        "Neuroticismo",
-    ]
+    labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
+
     vals: List[float] = []
     for k in labels:
-        v = traits.get(k, traits.get(k.replace("ã", "a"), 0))
+        v = traits.get(k, None)
+        if v is None:
+            v = traits.get(_norm_key(k), 0)
         try:
             vals.append(float(v or 0))
         except Exception:
@@ -54,10 +70,21 @@ def criar_radar_bfa(
 
     fig = go.Figure()
 
-    # faixas ideais – sem line=... pra evitar problema de cor
+    # candidato
+    fig.add_trace(
+        go.Scatterpolar(
+            r=vals,
+            theta=labels,
+            fill="toself",
+            name="Candidato",
+            line=dict(color=COLOR_CANDIDATO, width=3),
+            fillcolor="rgba(44, 16, 156, 0.12)",
+        )
+    )
+
     if traits_ideais:
-        vmin = [traits_ideais.get(k, (0, 10))[0] for k in labels]
-        vmax = [traits_ideais.get(k, (0, 10))[1] for k in labels]
+        vmin = [float(traits_ideais.get(k, (0, 10))[0]) for k in labels]
+        vmax = [float(traits_ideais.get(k, (0, 10))[1]) for k in labels]
 
         fig.add_trace(
             go.Scatterpolar(
@@ -65,8 +92,8 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="toself",
                 name="Faixa Ideal (Máx)",
-                fillcolor=COLOR_IDEAL_MAX,
-                hoverinfo="skip",
+                line=dict(color=COLOR_IDEAL_LINE, width=2, dash="dash"),
+                fillcolor=COLOR_IDEAL_FILL_MAX,
             )
         )
         fig.add_trace(
@@ -75,28 +102,21 @@ def criar_radar_bfa(
                 theta=labels,
                 fill="tonext",
                 name="Faixa Ideal (Mín)",
-                fillcolor=COLOR_IDEAL_MIN,
-                hoverinfo="skip",
+                line=dict(color=COLOR_IDEAL_LINE, width=2, dash="dash"),
+                fillcolor=COLOR_IDEAL_FILL_MIN,
             )
         )
 
-    # candidato – aqui mantemos a linha roxa
-    fig.add_trace(
-        go.Scatterpolar(
-            r=vals,
-            theta=labels,
-            fill="toself",
-            name="Candidato",
-            line=dict(color=COLOR_CANDIDATO),
-            fillcolor="rgba(96,81,155,0.45)",
-        )
-    )
-
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 10])),
-        showlegend=True,
         title="Big Five x Perfil Ideal",
-        height=500,
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 10], tickfont=dict(size=11)),
+            angularaxis=dict(tickfont=dict(size=12)),
+        ),
+        showlegend=True,
+        height=520,
+        margin=dict(l=40, r=40, t=70, b=30),
+        legend=dict(orientation="h", y=-0.15),
     )
     return fig
 
@@ -104,20 +124,20 @@ def criar_radar_bfa(
 def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[go.Figure]:
     if not competencias:
         return None
+
     df = pd.DataFrame(competencias).copy()
-    if df.empty or "nota" not in df.columns:
+    if df.empty or "nota" not in df.columns or "nome" not in df.columns:
         return None
 
+    # ordena e limita
+    df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
     df = df.sort_values("nota", ascending=True).tail(15)
 
-    cores = []
-    for n in df["nota"]:
-        if n < 45:
-            cores.append(COLOR_BAD_HEX)
-        elif n < 55:
-            cores.append(COLOR_WARN_HEX)
-        else:
-            cores.append(COLOR_OK_HEX)
+    # cor por faixa
+    cores = [
+        COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
+        for n in df["nota"].tolist()
+    ]
 
     fig = go.Figure(
         go.Bar(
@@ -133,49 +153,47 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         title="Competências MS (Top 15)",
         xaxis_title="Nota",
         yaxis_title="",
-        height=550,
+        height=620,
         showlegend=False,
+        margin=dict(l=160, r=40, t=70, b=30),
     )
+    fig.add_vline(x=45, line_dash="dash", line_color=COLOR_WARN)
+    fig.add_vline(x=55, line_dash="dash", line_color=COLOR_GOOD)
     return fig
 
 
 def criar_gauge_fit(fit_score: float) -> go.Figure:
+    score = float(fit_score or 0)
     fig = go.Figure(
         go.Indicator(
-            mode="gauge+number+delta",
-            value=float(fit_score or 0),
+            mode="gauge+number",
+            value=score,
             domain={"x": [0, 1], "y": [0, 1]},
-            title={"text": "Fit para o Cargo"},
-            delta={"reference": 70},
+            title={"text": "Fit para o Cargo", "font": {"size": 22}},
             gauge={
                 "axis": {"range": [None, 100]},
-                "bar": {"color": "#54428E"},
+                "bar": {"color": COLOR_CANDIDATO},
                 "steps": [
-                    {"range": [0, 40], "color": COLOR_BAD_HEX},
-                    {"range": [40, 70], "color": COLOR_WARN_HEX},
-                    {"range": [70, 100], "color": COLOR_OK_HEX},
+                    {"range": [0, 40], "color": "rgba(185, 28, 28, 0.25)"},
+                    {"range": [40, 70], "color": "rgba(180, 83, 9, 0.22)"},
+                    {"range": [70, 100], "color": "rgba(21, 128, 61, 0.20)"},
                 ],
-                "threshold": {
-                    "line": {"color": "#000000", "width": 2},
-                    "thickness": 0.75,
-                    "value": 70,
-                },
+                "threshold": {"line": {"color": "#111827", "width": 4}, "thickness": 0.75, "value": 70},
             },
         )
     )
-    fig.update_layout(height=420)
+    fig.update_layout(height=420, margin=dict(l=40, r=40, t=70, b=30))
     return fig
 
 
 def fig_to_png_path(
     fig: "go.Figure",
-    width: int = 1200,
-    height: int = 800,
-    scale: int = 2,
+    width: int = PLOT_EXPORT_W,
+    height: int = PLOT_EXPORT_H,
+    scale: int = PLOT_EXPORT_SCALE,
 ) -> Optional[str]:
     try:
         import plotly.io as pio
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             pio.write_image(fig, tmp.name, format="png", width=width, height=height, scale=scale)
             return tmp.name
@@ -184,20 +202,69 @@ def fig_to_png_path(
 
 
 # =========================
-# PDF
+# FONTE
 # =========================
+def _download_font(dst: str, url: str) -> bool:
+    try:
+        import requests
+        r = requests.get(url, timeout=15)
+        if r.ok:
+            with open(dst, "wb") as f:
+                f.write(r.content)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _register_montserrat(pdf: FPDF) -> bool:
+    os.makedirs("fonts", exist_ok=True)
+    font_map = {
+        "Montserrat-Regular.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Regular.ttf",
+        "Montserrat-Bold.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Bold.ttf",
+        "Montserrat-Italic.ttf": "https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Italic.ttf",
+    }
+    ok = True
+    for fname, url in font_map.items():
+        path = os.path.join("fonts", fname)
+        if not os.path.exists(path):
+            if not _download_font(path, url):
+                ok = False
+    if not ok:
+        return False
+
+    try:
+        pdf.add_font("Montserrat", "", os.path.join("fonts", "Montserrat-Regular.ttf"), uni=True)
+        pdf.add_font("Montserrat", "B", os.path.join("fonts", "Montserrat-Bold.ttf"), uni=True)
+        pdf.add_font("Montserrat", "I", os.path.join("fonts", "Montserrat-Italic.ttf"), uni=True)
+        return True
+    except Exception:
+        return False
+
+
+# =========================
+# PDF ENGINE
+# =========================
+FOOTER_TEXT = (
+    "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas. "
+    "O Elden Brain atua como um braço direito analítico de suporte."
+)
+
 class PDFReport(FPDF):
-    def __init__(self):
-        super().__init__(orientation="P", unit="mm", format="A4")
-        self.set_auto_page_break(auto=True, margin=15)
-        self.set_margins(15, 15, 15)
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.set_auto_page_break(auto=True, margin=18)
+        self.set_margins(15, 16, 15)
         self._family = "Helvetica"
+        self._unicode = False
 
-    def _clean(self, s: Optional[str]) -> str:
-        if not s:
-            return ""
-        s = str(s)
+    def set_main_family(self, fam: str, uni: bool) -> None:
+        self._family, self._unicode = fam, uni
 
+    def _safe(self, s: Optional[str]) -> str:
+        s = s or ""
+
+        # normaliza alguns caracteres “problemáticos”
         rep = {
             "\u2014": "-",
             "\u2013": "-",
@@ -207,293 +274,462 @@ class PDFReport(FPDF):
             "\u201d": '"',
             "\u2026": "...",
             "\u00a0": " ",
-            "•": "-",
-            "→": "->",
+            "\u2022": "-",   # bullet
+            "\u25cf": "-",   # bullet
         }
         for k, v in rep.items():
             s = s.replace(k, v)
 
-        def _split_long(m):
-            token = m.group(0)
-            parts = [token[i : i + 60] for i in range(0, len(token), 60)]
-            return " ".join(parts)
+        # quebra tokens longos (URLs, hashes, etc)
+        def _break_long_tokens(text: str, max_len: int = 80) -> str:
+            def _split(m):
+                t = m.group(0)
+                chunks = [t[i:i+max_len] for i in range(0, len(t), max_len)]
+                return " ".join(chunks)
+            return re.sub(rf"\S{{{max_len},}}", _split, text)
 
-        s = re.sub(r"\S{60,}", _split_long, s)
+        s = _break_long_tokens(s, 80)
 
+        # encoding seguro
         try:
-            return s.encode("latin-1", "ignore").decode("latin-1")
+            return s if self._unicode else s.encode("latin-1", "ignore").decode("latin-1")
         except Exception:
             return s
 
-    def header(self):
+    def safe_cell(self, w, h=0, txt="", *args, **kwargs):
+        txt = self._safe(txt)
+        try:
+            super().cell(w, h, txt, *args, **kwargs)
+        except Exception:
+            try:
+                short = (txt[:60] + "...") if len(txt) > 60 else txt
+                super().cell(w, h, short, *args, **kwargs)
+            except Exception:
+                pass
+
+    def safe_multi_cell(self, w, h, txt="", *args, **kwargs):
+        txt = self._safe(txt)
+        try:
+            super().multi_cell(w, h, txt, *args, **kwargs)
+        except Exception:
+            try:
+                super().multi_cell(w, h, self._safe("[Texto truncado para preservar o PDF.]"), *args, **kwargs)
+            except Exception:
+                pass
+
+    def header(self) -> None:
         if self.page_no() == 1:
             return
-        self.set_y(10)
-        self.set_font(self._family, "B", 9)
-        self.set_fill_color(*COLOR_HEADER_BG)
-        self.set_text_color(60, 60, 60)
-        self.cell(
-            0,
-            8,
-            self._clean(f"Elder Brain Analytics - Relatório Corporativo | {APP_VERSION}"),
-            ln=1,
-            align="R",
-            fill=True,
-        )
+        self.set_font(self._family, "B", 10)
+        self.set_text_color(107, 114, 128)  # cinza
+        self.safe_cell(0, 8, "Elder Brain Analytics — Relatório Corporativo", align="C", ln=1)
+        self.set_text_color(0, 0, 0)
+
+    def footer(self) -> None:
+        # rodapé real: sempre no final, nunca “empurra” conteúdo
+        self.set_y(-16)
+        self.set_font(self._family, "", 7)
+        self.set_text_color(107, 114, 128)
+
+        # texto do rodapé (1 linha “quase sempre”). se quebrar, tudo bem: está na margem do footer.
+        self.safe_multi_cell(0, 3.2, FOOTER_TEXT, align="C")
+
+        # paginação abaixo (fixo)
+        self.set_y(-6.5)
+        self.set_font(self._family, "", 7)
+        self.safe_cell(0, 3, f"Página {self.page_no()}", align="C")
+        self.set_text_color(0, 0, 0)
+
+    def divider(self, space: float = 2.5) -> None:
+        self.ln(space)
+        x1 = self.l_margin
+        x2 = self.w - self.r_margin
+        y = self.get_y()
+        self.set_draw_color(209, 213, 219)  # border cinza claro
+        self.line(x1, y, x2, y)
+        self.ln(space)
+
+    def heading(self, title: str) -> None:
+        # faixa de título formal
+        self.set_fill_color(44, 16, 156)
+        self.set_text_color(255, 255, 255)
+        self.set_font(self._family, "B", 12)
+        self.safe_cell(0, 9, self._safe(title), ln=1, fill=True)
         self.set_text_color(0, 0, 0)
         self.ln(2)
 
-    def footer(self):
-        self.set_y(-18)
-        self.set_font(self._family, "", 7)
-        self.set_text_color(120, 120, 120)
-        txt = (
-            "Este relatório tem caráter de apoio à decisão e deve ser interpretado em conjunto com entrevistas. "
-            "O Elden Brain trabalha como um braço direito, lembre-se disto."
-        )
-        self.multi_cell(0, 4, self._clean(txt), align="C")
-
-    def heading(self, numero: int, titulo: str):
-        self.set_font(self._family, "B", 11)
-        self.set_text_color(40, 40, 40)
-        self.set_fill_color(*COLOR_HEADER_BG)
-        self.cell(0, 8, self._clean(f"{numero}. {titulo}"), ln=1, fill=True)
-        self.ln(2)
-
-    def subheading(self, titulo: str):
-        self.set_font(self._family, "B", 10)
-        self.cell(0, 6, self._clean(titulo), ln=1)
-        self.ln(1)
-
-    def paragraph(self, txt: str, size: int = 9):
+    def paragraph(self, body: str, size: int = 10, gap: float = 1.5) -> None:
         self.set_font(self._family, "", size)
-        self.multi_cell(0, 4.5, self._clean(txt))
+        self.safe_multi_cell(0, 5.2, self._safe(body or ""))
+        self.ln(gap)
+
+    def cover(self, titulo: str, subtitulo: str) -> None:
+        self.add_page()
+
+        # topo
+        self.set_fill_color(44, 16, 156)
+        self.rect(0, 0, self.w, 26, "F")
+
+        self.set_y(38)
+        self.set_font(self._family, "B", 22)
+        self.safe_multi_cell(0, 10, titulo, align="C")
         self.ln(1)
+        self.set_font(self._family, "", 12)
+        self.safe_multi_cell(0, 6, subtitulo, align="C")
+        self.ln(4)
+
+        self.set_font(self._family, "", 10)
+        meta = f"{APP_NAME} — {APP_VERSION}\n{datetime.now():%d/%m/%Y %H:%M}"
+        self.set_text_color(107, 114, 128)
+        self.safe_multi_cell(0, 5, meta, align="C")
+        self.set_text_color(0, 0, 0)
+
+        self.set_y(self.h - 42)
+        self.set_draw_color(209, 213, 219)
+        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+        self.ln(4)
+        self.set_font(self._family, "I", 9)
+        self.set_text_color(107, 114, 128)
+        self.safe_multi_cell(0, 4.6, APP_TAGLINE, align="C")
+        self.set_text_color(0, 0, 0)
 
 
-def _add_capa(pdf: PDFReport):
-    pdf.add_page()
-    pdf.set_font(pdf._family, "B", 20)
-    pdf.ln(10)
-    pdf.cell(0, 10, pdf._clean("Elder Brain Analytics"), ln=1, align="C")
-    pdf.set_font(pdf._family, "", 11)
-    pdf.cell(
-        0,
-        6,
-        pdf._clean("Avaliações comportamentais com inteligência analítica"),
-        ln=1,
-        align="C",
+# =========================
+# LAYOUT HELPERS
+# =========================
+def _centered_image(pdf: PDFReport, image_path: str, max_width_mm: float = 160, space_after: float = 3.0) -> None:
+    if not image_path or not os.path.exists(image_path):
+        return
+
+    page_width = pdf.w - pdf.l_margin - pdf.r_margin
+    w = min(max_width_mm, page_width)
+    x = (pdf.w - w) / 2
+
+    # evita corte por falta de espaço
+    if pdf.get_y() > (pdf.h - 80):
+        pdf.add_page()
+
+    try:
+        pdf.image(image_path, x=x, w=w)
+        pdf.ln(space_after)
+    except Exception:
+        # se algo der errado, não quebra o PDF
+        pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
+
+
+def _safe_remove_file(p: Optional[str]) -> None:
+    if p and os.path.exists(p):
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+
+
+# =========================
+# RESUMOS DOS GRÁFICOS (sem LLM)
+# =========================
+def _summarize_radar(traits: Dict[str, Any], traits_ideais: Optional[Dict[str, Tuple[float, float]]]) -> str:
+    labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
+    lines = []
+    for k in labels:
+        v = traits.get(k, traits.get(_norm_key(k), None))
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except Exception:
+            continue
+
+        if traits_ideais and k in traits_ideais:
+            mn, mx = traits_ideais[k]
+            status = "dentro" if (mn <= fv <= mx) else ("acima" if fv > mx else "abaixo")
+            lines.append(f"- {k}: {fv:.1f}/10 (ideal {mn:.1f}–{mx:.1f}: {status} da faixa)")
+        else:
+            lines.append(f"- {k}: {fv:.1f}/10")
+
+    if not lines:
+        return "Não foi possível montar o resumo do radar por ausência de dados estruturados."
+    return "Resumo do gráfico (Big Five x Ideal):\n" + "\n".join(lines)
+
+
+def _summarize_competencias(competencias: List[Dict[str, Any]]) -> str:
+    if not competencias:
+        return "Resumo do gráfico (Competências): não há competências estruturadas no laudo."
+
+    df = pd.DataFrame(competencias).copy()
+    if df.empty or "nota" not in df.columns or "nome" not in df.columns:
+        return "Resumo do gráfico (Competências): formato de dados inválido."
+
+    df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
+    top = df.sort_values("nota", ascending=False).head(3)
+    low = df.sort_values("nota", ascending=True).head(3)
+
+    def _fmt(row):
+        return f"{str(row['nome'])} ({float(row['nota']):.0f})"
+
+    top_s = ", ".join(_fmt(r) for _, r in top.iterrows())
+    low_s = ", ".join(_fmt(r) for _, r in low.iterrows())
+
+    return (
+        "Resumo do gráfico (Competências):\n"
+        f"- destaques (maiores notas): {top_s}\n"
+        f"- pontos de atenção (menores notas): {low_s}\n"
+        "- referência visual: <45 (baixo), 45–54 (moderado), ≥55 (bom)."
     )
-    pdf.ln(10)
-    pdf.set_font(pdf._family, "", 9)
-    pdf.paragraph("Desenvolvedor responsável: André de Lima")
-    pdf.paragraph(f"Versão: {APP_VERSION}")
-    pdf.paragraph(f"Data: {datetime.now():%d/%m/%Y}")
 
 
+def _summarize_fit(score: float) -> str:
+    s = float(score or 0)
+    if s >= 70:
+        faixa = "forte"
+    elif s >= 40:
+        faixa = "moderada"
+    else:
+        faixa = "baixa"
+    return f"Resumo do gráfico (Fit): {s:.0f}% — compatibilidade {faixa} considerando traços e aderência ao perfil do cargo."
+
+
+# =========================
+# PDF PRINCIPAL
+# =========================
 def gerar_pdf_corporativo(
     bfa_data: Dict[str, Any],
     analysis: Dict[str, Any],
     cargo: str,
     save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,
+    logo_path: Optional[str] = None,  # mantido por compatibilidade (não usado)
 ) -> io.BytesIO:
-    pdf = PDFReport()
-    _add_capa(pdf)
+    """
+    Gera o PDF corporativo premium (sem logo).
+    - imagens dimensionadas e centralizadas
+    - sem páginas em branco desnecessárias
+    - rodapé fixo via footer()
+    """
+    try:
+        pdf = PDFReport(orientation="P", unit="mm", format="A4")
+        if _register_montserrat(pdf):
+            pdf.set_main_family("Montserrat", True)
+        else:
+            pdf.set_main_family("Helvetica", False)
 
-    pdf.heading(1, "Informações do Candidato")
-    cand = bfa_data.get("candidato", {}) or {}
-    nome = cand.get("nome", "Não informado") or "Não informado"
-    empresa_raw = cand.get("empresa", "Não informado") or "Não informado"
-    empresa = re.sub(r"\s*\([^)]*\)", "", empresa_raw).strip() or "Não informado"
+        # CAPA
+        pdf.cover("Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
 
-    pdf.paragraph(f"Nome: {nome}")
-    pdf.paragraph(f"Empresa (quando presente no laudo): {empresa}")
-    pdf.paragraph(f"Cargo avaliado: {cargo}")
-    pdf.paragraph(f"Data da análise: {datetime.now():%d/%m/%Y %H:%M}")
+        # DADOS
+        candidato = (bfa_data or {}).get("candidato", {}) or {}
+        nome = candidato.get("nome", "Não informado")
 
-    pdf.heading(2, "Decisão e Compatibilidade")
-    decisao = analysis.get("decisao", "N/A")
-    compat = float(analysis.get("compatibilidade_geral", 0) or 0)
-    pdf.set_font(pdf._family, "B", 10)
-    pdf.paragraph(f"DECISÃO: {decisao} | COMPATIBILIDADE GLOBAL: {compat:.0f}%")
-    pdf.set_font(pdf._family, "", 9)
-    pdf.paragraph(
-        "Leitura baseada em traços de personalidade, competências críticas e fatores de saúde emocional."
-    )
-    justificativa = analysis.get("justificativa_decisao", "")
-    if justificativa:
-        pdf.subheading("Justificativa resumida")
-        pdf.paragraph(justificativa)
-
-    pdf.heading(3, "Resumo Executivo")
-    resumo_exec = analysis.get("resumo_executivo", "")
-    if resumo_exec:
-        pdf.paragraph(resumo_exec)
-    else:
+        # 1
+        pdf.heading("1. Informações do Candidato")
         pdf.paragraph(
-            "O laudo não trouxe um resumo executivo estruturado. Recomenda-se leitura das seções seguintes."
+            f"Nome: {nome}\n"
+            f"Cargo Avaliado: {cargo}\n"
+            f"Data da Análise: {datetime.now():%d/%m/%Y %H:%M}",
+            size=10,
+            gap=1.5,
         )
+        pdf.divider(2.0)
 
-    pdf.heading(4, "Traços de Personalidade (Big Five)")
-    traits = bfa_data.get("traits_bfa", {}) or {}
-    for nome_traco, valor in traits.items():
-        try:
-            val_str = f"{float(valor):.1f}/10"
-        except Exception:
-            val_str = f"{valor}/10"
-        pdf.paragraph(f"{nome_traco}: {val_str}")
+        # 2
+        pdf.heading("2. Decisão e Compatibilidade")
+        decisao = (analysis or {}).get("decisao", "N/A")
+        compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
 
-    analise_tracos = analysis.get("analise_tracos", {}) or {}
-    if analise_tracos:
-        pdf.subheading("Leitura dos traços")
-        for nome_traco, texto in analise_tracos.items():
-            pdf.paragraph(f"{nome_traco}: {texto}")
+        # box formal
+        pdf.set_fill_color(245, 246, 248)
+        pdf.set_draw_color(209, 213, 219)
+        pdf.set_line_width(0.3)
+        x0, y0 = pdf.l_margin, pdf.get_y()
+        box_w = pdf.w - pdf.l_margin - pdf.r_margin
+        box_h = 18
+        pdf.rect(x0, y0, box_w, box_h, style="DF")
+        pdf.set_xy(x0 + 3, y0 + 3)
+        pdf.set_font(pdf._family, "B", 11)
+        pdf.safe_cell(0, 6, f"DECISÃO: {decisao}   |   COMPATIBILIDADE: {compat:.0f}%", ln=1)
+        pdf.set_font(pdf._family, "", 9)
+        pdf.set_text_color(107, 114, 128)
+        pdf.safe_cell(0, 5, "Interpretação baseada em análise comportamental e requisitos do cargo.", ln=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_y(y0 + box_h + 4)
 
-    pdf.add_page()
-    pdf.heading(5, "Visualizações (Gráficos)")
+        justificativa = (analysis or {}).get("justificativa_decisao", "")
+        if justificativa:
+            pdf.paragraph(justificativa, size=10, gap=1.0)
 
-    perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
-    traits_ideais = perfil_cargo.get("traits_ideais", {}) or {}
+        pdf.divider(2.0)
 
-    pdf.subheading("Big Five x Perfil Ideal")
-    radar_fig = criar_radar_bfa(traits, traits_ideais)
-    path = fig_to_png_path(radar_fig, width=1200, height=900, scale=2)
-    if path:
-        pdf.image(path, w=180)
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-    pdf.paragraph(
-        "Este radar compara o perfil do candidato às faixas ideais para o cargo. "
-        "Observe Extroversão, Amabilidade e Abertura (Inovação), além de Neuroticismo (quanto menor, melhor)."
-    )
+        # 3
+        pdf.heading("3. Resumo Executivo")
+        resumo = (analysis or {}).get("resumo_executivo", justificativa)
+        if resumo:
+            pdf.paragraph(resumo, size=10, gap=1.2)
 
-    pdf.subheading("Fit global para o cargo")
-    gauge_fig = criar_gauge_fit(compat)
-    path = fig_to_png_path(gauge_fig, width=900, height=500, scale=2)
-    if path:
-        pdf.image(path, w=150)
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-    pdf.paragraph(
-        "O indicador de fit sintetiza os principais fatores comportamentais e emocionais. "
-        "Acima de 70% indica boa aderência; entre 40% e 70% sugere aderência parcial com necessidade de "
-        "desenvolvimento; abaixo de 40% indica risco maior."
-    )
+        # 4
+        pdf.heading("4. Traços de Personalidade (Big Five)")
+        traits = (bfa_data or {}).get("traits_bfa", {}) or {}
+        # lista compacta (menos espaços)
+        labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
+        pdf.set_font(pdf._family, "", 10)
+        for k in labels:
+            v = traits.get(k, traits.get(_norm_key(k), None))
+            if v is None:
+                continue
+            try:
+                vv = float(v)
+                txt_val = f"{vv:.1f}/10"
+            except Exception:
+                txt_val = f"{v}/10"
+            pdf.safe_cell(78, 6, f"{k}:", ln=0)
+            pdf.set_font(pdf._family, "B", 10)
+            pdf.safe_cell(0, 6, txt_val, ln=1)
+            pdf.set_font(pdf._family, "", 10)
 
-    competencias = bfa_data.get("competencias_ms", []) or []
-    if competencias:
-        comp_fig = criar_grafico_competencias(competencias)
+        analise_tracos = (analysis or {}).get("analise_tracos", {}) or {}
+        # comentários curtos (sem deixar longo demais)
+        for trait, analise_txt in analise_tracos.items():
+            if analise_txt:
+                pdf.set_text_color(107, 114, 128)
+                pdf.paragraph(f"{trait}: {analise_txt}", size=9, gap=0.8)
+                pdf.set_text_color(0, 0, 0)
+
+        pdf.divider(2.0)
+
+        # 5 - GRÁFICOS
+        pdf.heading("5. Visualizações (Gráficos)")
+
+        from eba_config import gerar_perfil_cargo_dinamico
+        perfil = gerar_perfil_cargo_dinamico(cargo)
+        traits_ideais = (perfil or {}).get("traits_ideais", {}) or None
+
+        radar_fig = criar_radar_bfa(traits, traits_ideais)
+        comp_fig = criar_grafico_competencias((bfa_data or {}).get("competencias_ms", []) or [])
+        gauge_fig = criar_gauge_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0))
+
+        # radar
+        p_radar = fig_to_png_path(radar_fig)
+        if p_radar:
+            _centered_image(pdf, p_radar, max_width_mm=155, space_after=2.0)
+            pdf.paragraph(_summarize_radar(traits, traits_ideais), size=9, gap=1.0)
+            pdf.divider(1.5)
+        else:
+            pdf.paragraph("⚠️ Não foi possível exportar o radar. Instale 'kaleido' para embutir gráficos no PDF.", size=9, gap=1.0)
+
+        # competências
         if comp_fig:
-            pdf.subheading("Competências MS (Top 15)")
-            path = fig_to_png_path(comp_fig, width=1400, height=700, scale=2)
-            if path:
-                pdf.image(path, w=180)
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
-            pdf.paragraph(
-                "Barras em verde indicam boas evidências de desempenho. Amarelo sugere ponto de atenção e "
-                "desenvolvimento. Vermelho indica competências potencialmente críticas para o cargo."
-            )
+            p_comp = fig_to_png_path(comp_fig)
+            if p_comp:
+                _centered_image(pdf, p_comp, max_width_mm=170, space_after=2.0)
+                pdf.paragraph(_summarize_competencias((bfa_data or {}).get("competencias_ms", []) or []), size=9, gap=1.0)
+                pdf.divider(1.5)
+            else:
+                pdf.paragraph("⚠️ Falha ao exportar gráfico de competências (kaleido).", size=9, gap=1.0)
+        else:
+            pdf.paragraph("Sem competências estruturadas para exibição.", size=9, gap=1.0)
 
-    pdf.heading(6, "Saúde Emocional e Resiliência")
-    saude_txt = analysis.get("saude_emocional_contexto", "")
-    if saude_txt:
-        pdf.paragraph(saude_txt)
+        # gauge fit
+        p_fit = fig_to_png_path(gauge_fig)
+        if p_fit:
+            _centered_image(pdf, p_fit, max_width_mm=130, space_after=2.0)
+            pdf.paragraph(_summarize_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0)), size=9, gap=1.0)
+        else:
+            pdf.paragraph("⚠️ Falha ao exportar gráfico de Fit (kaleido).", size=9, gap=1.0)
 
-    indicadores = bfa_data.get("indicadores_saude_emocional", {}) or {}
-    if indicadores:
-        pdf.subheading("Indicadores quantitativos")
+        # limpa imagens temporárias
+        _safe_remove_file(p_radar)
+        try:
+            _safe_remove_file(p_comp)  # type: ignore
+        except Exception:
+            pass
+        _safe_remove_file(p_fit)
+
+        pdf.divider(2.0)
+
+        # 6
+        pdf.heading("6. Saúde Emocional e Resiliência")
+        saude = (analysis or {}).get("saude_emocional_contexto", "")
+        if saude:
+            pdf.paragraph(saude, size=10, gap=1.0)
+
+        indicadores = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
         for k, v in indicadores.items():
             if v is None:
                 continue
-            nome = k.replace("_", " ").capitalize()
-            pdf.paragraph(f"{nome}: {float(v):.0f}/100")
-        pdf.paragraph(
-            "Valores mais elevados em estresse, ansiedade ou impulsividade podem indicar maior "
-            "vulnerabilidade emocional. Valores mais baixos favorecem resiliência e estabilidade, "
-            "principalmente em funções de alta pressão."
-        )
-
-    pontos_fortes = bfa_data.get("pontos_fortes", []) or []
-    pdf.heading(7, "Pontos Fortes")
-    if pontos_fortes:
-        pdf.paragraph(
-            "Aspectos em que o candidato demonstra maior aderência ao cargo ou potenciais diferenciais competitivos."
-        )
-        for item in pontos_fortes:
-            pdf.paragraph(f"- {item}")
-    else:
-        pdf.paragraph("Não foram destacados pontos fortes específicos no laudo.")
-
-    pontos_atencao = bfa_data.get("pontos_atencao", []) or []
-    pdf.heading(8, "Pontos de Atenção")
-    if pontos_atencao:
-        pdf.paragraph(
-            "Aspectos que podem demandar acompanhamento próximo, feedback estruturado ou plano de desenvolvimento, "
-            "especialmente nos primeiros meses."
-        )
-        for item in pontos_atencao:
-            pdf.paragraph(f"- {item}")
-    else:
-        pdf.paragraph("Não foram identificados pontos de atenção estruturados no laudo.")
-
-    pdf.heading(9, "Recomendações de Desenvolvimento")
-    recs = analysis.get("recomendacoes_desenvolvimento", []) or []
-    if recs:
-        pdf.paragraph(
-            "Sugestões de ações práticas e trilhas de aprendizagem para apoiar o desenvolvimento do candidato "
-            "no médio prazo."
-        )
-        for i, rec in enumerate(recs, start=1):
-            pdf.paragraph(f"{i}. {rec}")
-    else:
-        pdf.paragraph(
-            "Não foram sugeridas recomendações específicas de desenvolvimento pelo modelo neste laudo."
-        )
-
-    pdf.heading(10, "Cargos Alternativos Sugeridos")
-    alt = analysis.get("cargos_alternativos", []) or []
-    if alt:
-        pdf.paragraph(
-            "Sugestões de posições em que o perfil mapeado pode apresentar boa aderência, "
-            "considerando os traços comportamentais observados."
-        )
-        for cargo_alt in alt:
-            nome_cargo = cargo_alt.get("cargo", "")
-            just = cargo_alt.get("justificativa", "")
-            if not nome_cargo:
+            try:
+                fv = float(v)
+            except Exception:
                 continue
-            pdf.paragraph(f"- {nome_cargo}")
-            if just:
-                pdf.paragraph(f"  {just}")
-    else:
-        pdf.paragraph(
-            "Não foram sugeridos cargos alternativos específicos com base neste laudo."
-        )
+            pdf.set_font(pdf._family, "", 9)
+            pdf.safe_cell(80, 5, f"{k.replace('_', ' ').capitalize()}: ")
+            pdf.set_font(pdf._family, "B", 9)
+            pdf.safe_cell(0, 5, f"{fv:.0f}/100", ln=1)
 
-    pdf.paragraph(
-        "Este documento não substitui entrevistas, referências e demais etapas do processo seletivo. "
-        "Recomenda-se leitura conjunta com o contexto da vaga e cultura da empresa."
-    )
+        pdf.divider(2.0)
 
-    out = pdf.output(dest="S")
-    if isinstance(out, str):
-        out = out.encode("latin-1", "replace")
-    buf = io.BytesIO(out)
-    buf.seek(0)
+        # 7 e 8
+        pf = (bfa_data or {}).get("pontos_fortes", []) or []
+        if pf:
+            pdf.heading("7. Pontos Fortes")
+            for item in pf:
+                if item:
+                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
+            pdf.divider(1.5)
 
-    if save_path:
-        try:
-            with open(save_path, "wb") as f:
-                f.write(buf.getbuffer())
-        except Exception:
-            pass
+        pa = (bfa_data or {}).get("pontos_atencao", []) or []
+        if pa:
+            pdf.heading("8. Pontos de Atenção")
+            for item in pa:
+                if item:
+                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
+            pdf.divider(1.5)
 
-    return buf
+        # 9 e 10
+        pdf.heading("9. Recomendações de Desenvolvimento")
+        recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
+        if recs:
+            for i, rec in enumerate(recs, 1):
+                if rec:
+                    pdf.set_font(pdf._family, "B", 10)
+                    pdf.safe_cell(10, 6, f"{i}.")
+                    pdf.set_font(pdf._family, "", 10)
+                    pdf.safe_multi_cell(0, 6, rec)
+                    pdf.ln(1)
+        else:
+            pdf.paragraph("Não foram encontradas recomendações estruturadas.", size=10, gap=1.0)
+
+        cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
+        if cargos_alt:
+            pdf.divider(2.0)
+            pdf.heading("10. Cargos Alternativos Sugeridos")
+            for c in cargos_alt:
+                nome_alt = c.get("cargo", "")
+                just = c.get("justificativa", "")
+                if not nome_alt:
+                    continue
+                pdf.set_font(pdf._family, "B", 10)
+                pdf.safe_multi_cell(0, 6, f"- {nome_alt}")
+                if just:
+                    pdf.set_font(pdf._family, "", 9)
+                    pdf.set_text_color(107, 114, 128)
+                    pdf.safe_multi_cell(0, 5, f"  {just}")
+                    pdf.set_text_color(0, 0, 0)
+
+        # saída
+        out_bytes = pdf.output(dest="S")
+        if isinstance(out_bytes, str):
+            out_bytes = out_bytes.encode("latin-1", "replace")
+
+        buf = io.BytesIO(out_bytes)
+        buf.seek(0)
+
+        if save_path:
+            try:
+                with open(save_path, "wb") as f:
+                    f.write(buf.getbuffer())
+            except Exception as e:
+                st.error(f"Erro ao salvar PDF: {e}")
+
+        return buf
+
+    except Exception as e:
+        st.error(f"Erro crítico na geração do PDF: {e}")
+        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
