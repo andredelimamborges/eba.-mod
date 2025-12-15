@@ -10,9 +10,9 @@ from eba_reports import (
     criar_radar_bfa,
     criar_grafico_competencias,
     criar_gauge_fit,
+    gerar_pdf_corporativo,
 )
 from eba_config import gerar_perfil_cargo_dinamico
-
 from eba_utils import (
     extract_text_from_pdf,
     limpar_nome_empresa,
@@ -20,8 +20,11 @@ from eba_utils import (
     send_usage_excel_if_configured,
 )
 from eba_llm import run_extracao, run_analise
-from eba_reports import gerar_pdf_corporativo
 
+
+# =========================
+# HELPERS UI
+# =========================
 def interpretar_big_five(nome, valor):
     v = float(valor)
     if nome == "Neuroticismo":
@@ -41,13 +44,17 @@ def interpretar_big_five(nome, valor):
 def classificar_competencias(lista):
     fortes, criticas = [], []
     for c in lista:
-        nota = float(c.get("nota", 0))
+        try:
+            nota = float(c.get("nota", 0))
+        except Exception:
+            continue
         nome = c.get("nome", "")
         if nota >= 55:
             fortes.append(nome)
         elif nota < 45:
             criticas.append(nome)
     return fortes, criticas
+
 
 # =========================
 # STREAMLIT CONFIG
@@ -70,7 +77,7 @@ with st.form("eba_form"):
     with col1:
         email_analista = st.text_input("E-mail do Analista", placeholder="analista@empresa.com")
     with col2:
-        cargo = st.text_input("Cargo Avaliado", placeholder="Ex: Engenheiro de Software Pleno")
+        cargo_input = st.text_input("Cargo Avaliado", placeholder="Ex: Engenheiro de Software Pleno")
 
     uploaded_file = st.file_uploader(
         "Upload do relatório BFA (PDF ou TXT)",
@@ -81,10 +88,10 @@ with st.form("eba_form"):
 
 
 # =========================
-# PROCESSAMENTO (1x)
+# PROCESSAMENTO
 # =========================
 if submitted:
-    if not uploaded_file or not cargo.strip():
+    if not uploaded_file or not cargo_input.strip():
         st.error("Informe o cargo e envie o relatório.")
         st.stop()
 
@@ -100,132 +107,132 @@ if submitted:
         provider="groq",
         email=email_analista or "",
         empresa=empresa,
-        cargo=cargo,
+        cargo=cargo_input,
     )
 
     with st.spinner("Extraindo dados do relatório..."):
-        bfa_data = run_extracao(text=texto, cargo=cargo, tracker=tracker)
+        bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
 
     with st.spinner("Analisando perfil comportamental..."):
-        analysis = run_analise(bfa_data=bfa_data, cargo=cargo, tracker=tracker)
+        analysis = run_analise(bfa_data=bfa_data, cargo=cargo_input, tracker=tracker)
 
-    # gera PDF apenas uma vez
     with st.spinner("Gerando relatório PDF..."):
-        pdf_bytes = gerar_pdf_corporativo(bfa_data, analysis, cargo)
+        pdf_bytes = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
 
-    st.session_state["pdf_bytes"] = pdf_bytes
-    st.session_state["bfa_data"] = bfa_data
+    # persistência segura
     st.session_state["analysis"] = analysis
+    st.session_state["bfa_data"] = bfa_data
+    st.session_state["pdf_bytes"] = pdf_bytes
+    st.session_state["cargo"] = cargo_input
 
-    # envia e-mail (PDF + planilha)
     send_usage_excel_if_configured(
         tracker=tracker,
         email_analista=email_analista,
-        cargo=cargo,
+        cargo=cargo_input,
     )
 
 
 # =========================
-# DASHBOARD (SEMPRE VISÍVEL APÓS PROCESSAMENTO)
+# DASHBOARD (SÓ SE HOUVER DADOS)
 # =========================
 if "analysis" in st.session_state:
     analysis = st.session_state["analysis"]
     bfa_data = st.session_state["bfa_data"]
+    cargo = st.session_state["cargo"]
 
-st.divider()
-st.header("📊 Dashboard Analítico — Elder Brain")
+    st.divider()
+    st.header("📊 Dashboard Analítico — Elder Brain")
 
-perfil = gerar_perfil_cargo_dinamico(cargo)
-traits_ideais = perfil.get("traits_ideais", {})
+    perfil = gerar_perfil_cargo_dinamico(cargo)
+    traits_ideais = perfil.get("traits_ideais", {})
 
-tabs = st.tabs([
-    "🎯 Perfil Big Five",
-    "💼 Competências",
-    "🧘 Saúde Emocional",
-    "📈 Desenvolvimento",
-    "📄 Dados Brutos",
-])
+    tabs = st.tabs([
+        "🎯 Perfil Big Five",
+        "💼 Competências",
+        "🧘 Saúde Emocional",
+        "📈 Desenvolvimento",
+        "📄 Dados Brutos",
+    ])
 
-# 🎯 BIG FIVE
-with tabs[0]:
-    traits = bfa_data.get("traits_bfa", {})
+    # 🎯 BIG FIVE
+    with tabs[0]:
+        traits = bfa_data.get("traits_bfa", {})
+        ordem = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
 
-    st.subheader("🎯 Perfil Big Five — Interpretação")
-    for k, v in traits.items():
-        if v is not None:
-            st.write(f"• **{k} ({float(v):.1f}/10)**: {interpretar_big_five(k, v)}")
+        st.subheader("🎯 Perfil Big Five — Interpretação")
+        for k in ordem:
+            v = traits.get(k) or traits.get(k.replace("ã", "a").replace("ç", "c"))
+            if v is not None:
+                st.write(f"• **{k} ({float(v):.1f}/10)**: {interpretar_big_five(k, v)}")
 
-    st.plotly_chart(
-        criar_radar_bfa(traits, traits_ideais),
-        use_container_width=True,
-    )
+        st.plotly_chart(
+            criar_radar_bfa(traits, traits_ideais),
+            use_container_width=True,
+        )
 
+    # 💼 COMPETÊNCIAS
+    with tabs[1]:
+        competencias = bfa_data.get("competencias_ms", [])
+        fortes, criticas = classificar_competencias(competencias)
 
-# 💼 COMPETÊNCIAS
-with tabs[1]:
-    competencias = bfa_data.get("competencias_ms", [])
-    fortes, criticas = classificar_competencias(competencias)
+        st.subheader("💼 Competências — Leitura Geral")
 
-    st.subheader("💼 Competências — Leitura Geral")
+        if fortes:
+            st.markdown("🔹 **Pontos de Força**")
+            for f in fortes:
+                st.write(f"• {f} — desempenho consistente para o cargo.")
 
-    if fortes:
-        st.markdown("🔹 **Pontos de Força**")
-        for f in fortes:
-            st.write(f"• {f} — desempenho consistente para o cargo.")
+        if criticas:
+            st.markdown("🔸 **Pontos Críticos**")
+            for c in criticas:
+                st.write(f"• {c} — requer acompanhamento e plano de desenvolvimento.")
 
-    if criticas:
-        st.markdown("🔸 **Pontos Críticos**")
-        for c in criticas:
-            st.write(f"• {c} — requer acompanhamento e plano de desenvolvimento.")
+        fig_comp = criar_grafico_competencias(competencias)
+        if fig_comp:
+            st.plotly_chart(fig_comp, use_container_width=True)
 
-    fig_comp = criar_grafico_competencias(competencias)
-    if fig_comp:
-        st.plotly_chart(fig_comp, use_container_width=True)
+    # 🧘 SAÚDE EMOCIONAL
+    with tabs[2]:
+        saude = bfa_data.get("indicadores_saude_emocional", {})
 
+        st.subheader("🧘 Saúde Emocional — Justificativa Completa")
+        for k, v in saude.items():
+            if v is not None:
+                st.write(f"• **{k.replace('_',' ').capitalize()}**: {int(v)}/100 → nível saudável, dentro do esperado.")
 
-# 🧘 SAÚDE EMOCIONAL
-with tabs[2]:
-    saude = bfa_data.get("indicadores_saude_emocional", {})
+        contexto = analysis.get("saude_emocional_contexto", "")
+        if contexto:
+            st.markdown("**Contextualização da IA**")
+            st.write(contexto)
 
-    st.subheader("🧘 Saúde Emocional — Justificativa Completa")
-    for k, v in saude.items():
-        if v is not None:
-            st.write(f"• **{k.replace('_',' ').capitalize()}**: {int(v)}/100 → nível saudável, dentro do esperado.")
+        st.plotly_chart(
+            criar_gauge_fit(analysis.get("compatibilidade_geral", 0)),
+            use_container_width=True,
+        )
 
-    contexto = analysis.get("saude_emocional_contexto", "")
-    if contexto:
-        st.markdown("**Contextualização da IA**")
-        st.write(contexto)
+    # 📈 DESENVOLVIMENTO
+    with tabs[3]:
+        st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
 
-    st.plotly_chart(
-        criar_gauge_fit(analysis.get("compatibilidade_geral", 0)),
-        use_container_width=True,
-    )
+        for i, rec in enumerate(analysis.get("recomendacoes_desenvolvimento", []), 1):
+            st.write(f"{i}. {rec}")
 
+        st.markdown("**Sugestões Adicionais (Elder Brain)**")
+        st.write("• Treinamentos recomendados: Inteligência Emocional, Comunicação Assertiva, Gestão de Conflitos.")
+        st.write("• Rotina sugerida: feedback quinzenal estruturado com liderança.")
+        st.write("• Foco de curto prazo: trabalhar competências críticas e traços ligados à resiliência.")
 
-# 📈 DESENVOLVIMENTO
-with tabs[3]:
-    st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
+        cargos_alt = analysis.get("cargos_alternativos", [])
+        if cargos_alt:
+            st.markdown("**Cargos Alternativos Sugeridos**")
+            for c in cargos_alt:
+                st.write(f"• **{c.get('cargo')}** — {c.get('justificativa')}")
 
-    for i, rec in enumerate(analysis.get("recomendacoes_desenvolvimento", []), 1):
-        st.write(f"{i}. {rec}")
+    # 📄 DADOS BRUTOS
+    with tabs[4]:
+        st.json(bfa_data)
 
-    st.markdown("**Sugestões Adicionais (Elder Brain)**")
-    st.write("• Treinamentos recomendados: Inteligência Emocional, Comunicação Assertiva, Gestão de Conflitos.")
-    st.write("• Rotina sugerida: feedback quinzenal estruturado com liderança.")
-    st.write("• Foco de curto prazo: trabalhar competências críticas e traços ligados à resiliência.")
-
-    cargos_alt = analysis.get("cargos_alternativos", [])
-    if cargos_alt:
-        st.markdown("**Cargos Alternativos Sugeridos**")
-        for c in cargos_alt:
-            st.write(f"• **{c.get('cargo')}** — {c.get('justificativa')}")
-
-
-# 📄 DADOS BRUTOS
-with tabs[4]:
-    st.json(bfa_data)
-    
+    # DOWNLOAD FORA DAS TABS
     st.download_button(
         "📄 Baixar Relatório em PDF",
         data=st.session_state["pdf_bytes"],
