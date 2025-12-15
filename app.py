@@ -18,6 +18,7 @@ from eba_utils import (
     limpar_nome_empresa,
     UsageTracker,
     send_usage_excel_if_configured,
+    send_report_email_if_configured,
 )
 from eba_llm import run_extracao, run_analise
 
@@ -117,18 +118,27 @@ if submitted:
         analysis = run_analise(bfa_data=bfa_data, cargo=cargo_input, tracker=tracker)
 
     with st.spinner("Gerando relatório PDF..."):
-        pdf_bytes = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
+        pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
 
     # persistência segura
     st.session_state["analysis"] = analysis
     st.session_state["bfa_data"] = bfa_data
-    st.session_state["pdf_bytes"] = pdf_bytes
+    st.session_state["pdf_bytes"] = pdf_buf.getvalue()  # bytes puros (melhor pro download/email)
     st.session_state["cargo"] = cargo_input
 
+    # (opcional) envia planilha separada — mantido por compat
     send_usage_excel_if_configured(
         tracker=tracker,
         email_analista=email_analista,
         cargo=cargo_input,
+    )
+
+    # ✅ envia PDF + XLSX no mesmo e-mail
+    send_report_email_if_configured(
+        tracker=tracker,
+        email_analista=email_analista,
+        cargo=cargo_input,
+        pdf_bytes=st.session_state["pdf_bytes"],
     )
 
 
@@ -136,19 +146,19 @@ if submitted:
 # DASHBOARD (SÓ SE HOUVER DADOS)
 # =========================
 if "analysis" in st.session_state and "bfa_data" in st.session_state:
-    analysis = st.session_state.get("analysis")
-    bfa_data = st.session_state.get("bfa_data")
+    analysis = st.session_state.get("analysis") or {}
+    bfa_data = st.session_state.get("bfa_data") or {}
     cargo = st.session_state.get("cargo", "")
 
     if not cargo:
         st.warning("Sessão recarregada. Refaça o processamento do relatório.")
         st.stop()
-    
+
     st.divider()
     st.header("📊 Dashboard Analítico — Elder Brain")
 
     perfil = gerar_perfil_cargo_dinamico(cargo)
-    traits_ideais = perfil.get("traits_ideais", {})
+    traits_ideais = (perfil or {}).get("traits_ideais", {})
 
     tabs = st.tabs([
         "🎯 Perfil Big Five",
@@ -160,12 +170,16 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
 
     # 🎯 BIG FIVE
     with tabs[0]:
-        traits = bfa_data.get("traits_bfa", {})
+        traits = bfa_data.get("traits_bfa", {}) or {}
         ordem = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
 
         st.subheader("🎯 Perfil Big Five — Interpretação")
         for k in ordem:
-            v = traits.get(k) or traits.get(k.replace("ã", "a").replace("ç", "c"))
+            # compat com chaves sem acento
+            v = traits.get(k)
+            if v is None:
+                k2 = k.replace("ã", "a").replace("ç", "c").replace("õ", "o").replace("é", "e")
+                v = traits.get(k2)
             if v is not None:
                 st.write(f"• **{k} ({float(v):.1f}/10)**: {interpretar_big_five(k, v)}")
 
@@ -176,7 +190,7 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
 
     # 💼 COMPETÊNCIAS
     with tabs[1]:
-        competencias = bfa_data.get("competencias_ms", [])
+        competencias = bfa_data.get("competencias_ms", []) or []
         fortes, criticas = classificar_competencias(competencias)
 
         st.subheader("💼 Competências — Leitura Geral")
@@ -197,20 +211,20 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
 
     # 🧘 SAÚDE EMOCIONAL
     with tabs[2]:
-        saude = bfa_data.get("indicadores_saude_emocional", {})
+        saude = bfa_data.get("indicadores_saude_emocional", {}) or {}
 
         st.subheader("🧘 Saúde Emocional — Justificativa Completa")
         for k, v in saude.items():
             if v is not None:
                 st.write(f"• **{k.replace('_',' ').capitalize()}**: {int(v)}/100 → nível saudável, dentro do esperado.")
 
-        contexto = analysis.get("saude_emocional_contexto", "")
+        contexto = (analysis or {}).get("saude_emocional_contexto", "")
         if contexto:
             st.markdown("**Contextualização da IA**")
             st.write(contexto)
 
         st.plotly_chart(
-            criar_gauge_fit(analysis.get("compatibilidade_geral", 0)),
+            criar_gauge_fit((analysis or {}).get("compatibilidade_geral", 0)),
             use_container_width=True,
         )
 
@@ -218,7 +232,7 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     with tabs[3]:
         st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
 
-        for i, rec in enumerate(analysis.get("recomendacoes_desenvolvimento", []), 1):
+        for i, rec in enumerate((analysis or {}).get("recomendacoes_desenvolvimento", []) or [], 1):
             st.write(f"{i}. {rec}")
 
         st.markdown("**Sugestões Adicionais (Elder Brain)**")
@@ -226,7 +240,7 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
         st.write("• Rotina sugerida: feedback quinzenal estruturado com liderança.")
         st.write("• Foco de curto prazo: trabalhar competências críticas e traços ligados à resiliência.")
 
-        cargos_alt = analysis.get("cargos_alternativos", [])
+        cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
             st.markdown("**Cargos Alternativos Sugeridos**")
             for c in cargos_alt:
@@ -237,10 +251,11 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
         st.json(bfa_data)
 
     # DOWNLOAD FORA DAS TABS
-    st.download_button(
-        "📄 Baixar Relatório em PDF",
-        data=st.session_state["pdf_bytes"],
-        file_name=f"EBA_Relatorio_{cargo.replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.pdf",
-        mime="application/pdf",
-        key="download_pdf_final",
-    )
+    if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"]:
+        st.download_button(
+            "📄 Baixar Relatório em PDF",
+            data=st.session_state["pdf_bytes"],
+            file_name=f"EBA_Relatorio_{cargo.replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.pdf",
+            mime="application/pdf",
+            key="download_pdf_final",
+        )
