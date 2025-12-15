@@ -10,6 +10,7 @@ pdfminer.six>=20231228
 plotly>=5.20.0
 kaleido>=0.2.1
 Pillow>=10.2.0
+matplotlib
 
 # Dados / planilhas
 pandas>=2.1.0
