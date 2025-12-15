@@ -135,11 +135,15 @@ if submitted:
 # =========================
 # DASHBOARD (SÓ SE HOUVER DADOS)
 # =========================
-if "analysis" in st.session_state:
-    analysis = st.session_state["analysis"]
-    bfa_data = st.session_state["bfa_data"]
-    cargo = st.session_state["cargo"]
+if "analysis" in st.session_state and "bfa_data" in st.session_state:
+    analysis = st.session_state.get("analysis")
+    bfa_data = st.session_state.get("bfa_data")
+    cargo = st.session_state.get("cargo", "")
 
+    if not cargo:
+        st.warning("Sessão recarregada. Refaça o processamento do relatório.")
+        st.stop()
+    
     st.divider()
     st.header("📊 Dashboard Analítico — Elder Brain")
 
