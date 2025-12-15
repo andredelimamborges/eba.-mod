@@ -17,9 +17,19 @@ APP_TAGLINE = "Avaliações comportamentais com inteligência analítica"
 DEFAULT_PROVIDER = "groq"
 DEFAULT_MODEL_ID = "llama-3.1-8b-instant"
 
-# tokens fixos para segurança
+# ✅ Aliases de compatibilidade (evita ImportError entre versões/módulos)
+# Alguns módulos/históricos usam LLM_PROVIDER/LLM_MODEL_ID
+LLM_PROVIDER = DEFAULT_PROVIDER
+LLM_MODEL_ID = DEFAULT_MODEL_ID
+
+# tokens fixos para segurança (prod-safe)
 MAX_TOKENS_FIXED = 3000
 TEMP_FIXED = 0.1
+
+# ✅ limites de payload para reduzir 429/timeout e custo (centralizado)
+# (o projeto já “corta” textos em outros pontos; aqui vira padrão oficial)
+MAX_INPUT_TEXT_CHARS = 10_000
+MAX_TRAINING_CONTEXT_CHARS = 3_000
 
 # ---------------------------------------------------------
 # TABELA DE PREÇOS (GPT – usada para cálculo administrativo)

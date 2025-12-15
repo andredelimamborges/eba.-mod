@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
-import re
 import json
+import re
 import smtplib
-from datetime import datetime
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,7 +35,9 @@ except Exception:
     OpenAI = None  # type: ignore
 
 
-# ======== Token Accounting ========
+# =============================================================================
+# token accounting (mantido, mas agora compatível com UsageTracker do app)
+# =============================================================================
 @dataclass
 class TokenStep:
     prompt: int = 0
@@ -98,69 +100,146 @@ def _estimate_tokens(text: str) -> int:
             return len(enc.encode(text))
     except Exception:
         pass
+    # fallback heurístico
     return max(1, int(len(text) / 4))
 
 
+def _tracker_add_step_compatible(
+    tracker: Any,
+    step: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """
+    compatibilidade com:
+      - TokenTracker (add)
+      - UsageTracker (geralmente add_step)
+    sem quebrar prod se tracker não tiver nada disso.
+    """
+    if tracker is None:
+        return
+
+    # 1) padrão “novo” (UsageTracker)
+    if hasattr(tracker, "add_step") and callable(getattr(tracker, "add_step")):
+        try:
+            tracker.add_step(step, prompt_tokens, completion_tokens)
+            return
+        except Exception:
+            pass
+
+    # 2) padrão “antigo” (TokenTracker)
+    if hasattr(tracker, "add") and callable(getattr(tracker, "add")):
+        try:
+            tracker.add(step, prompt_tokens, completion_tokens)
+            return
+        except Exception:
+            pass
+
+    # 3) se nada funcionar, não quebra
+
+
+def _estimate_and_add(
+    tracker: Any,
+    step: str,
+    messages: List[Dict[str, str]],
+    completion_text: str,
+    usage: Optional[Dict[str, Any]],
+) -> None:
+    """
+    tenta usar usage real da api; se não existir, estima.
+    """
+    prompt_tokens = 0
+    completion_tokens = 0
+
+    if usage:
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+
+    if prompt_tokens <= 0:
+        prompt_text = "\n".join([m.get("content", "") for m in messages])
+        prompt_tokens = _estimate_tokens(prompt_text)
+
+    if completion_tokens <= 0:
+        completion_tokens = _estimate_tokens(completion_text or "")
+
+    _tracker_add_step_compatible(tracker, step, prompt_tokens, completion_tokens)
+
+
+# =============================================================================
+# client / keys
+# =============================================================================
 @st.cache_resource(show_spinner=False)
 def get_llm_client_cached(provider: str, api_key: str):
-    """Cria cliente LLM (Groq/OpenAI) usando o client padrão do SDK."""
+    """cria cliente LLM (Groq/OpenAI) usando o SDK."""
     if not api_key:
-        raise RuntimeError("Chave da API não configurada. Defina nos Secrets do Streamlit.")
-    pv = (provider or "Groq").lower()
+        raise RuntimeError("chave da api não configurada. defina nos secrets do streamlit.")
+    pv = (provider or "groq").lower()
 
-    # não mexemos mais em proxies via código; usamos o ambiente padrão da VPS
     if pv == "groq":
         if Groq is None:
-            raise RuntimeError("SDK Groq não instalado.")
-        try:
-            client = Groq(api_key=api_key)
-            return client
-        except Exception as e:
-            raise RuntimeError(f"[Erro cliente] Groq SDK falhou ({e})")
+            raise RuntimeError("sdk groq não instalado.")
+        return Groq(api_key=api_key)
 
     if pv == "openai":
         if OpenAI is None:
-            raise RuntimeError("SDK OpenAI não instalado.")
-        try:
-            client = OpenAI(api_key=api_key)
-            return client
-        except Exception as e:
-            raise RuntimeError(f"[Erro cliente] OpenAI SDK falhou ({e})")
+            raise RuntimeError("sdk openai não instalado.")
+        return OpenAI(api_key=api_key)
 
-    raise RuntimeError(f"Provedor não suportado: {provider}")
+    raise RuntimeError(f"provedor não suportado: {provider}")
 
 
 def get_api_key_for_provider(provider: str) -> str:
-    provider = (provider or "Groq").lower()
+    provider = (provider or "groq").lower()
     if provider == "groq":
         key = st.secrets.get("GROQ_API_KEY", "")
         if not key:
-            raise RuntimeError("GROQ_API_KEY não configurada nos Secrets do Streamlit.")
+            raise RuntimeError("GROQ_API_KEY não configurada nos secrets do streamlit.")
         return key
     if provider == "openai":
         key = st.secrets.get("OPENAI_API_KEY", "")
         if not key:
-            raise RuntimeError("OPENAI_API_KEY não configurada nos Secrets do Streamlit.")
+            raise RuntimeError("OPENAI_API_KEY não configurada nos secrets do streamlit.")
         return key
-    raise RuntimeError(f"Provedor não suportado: {provider}")
+    raise RuntimeError(f"provedor não suportado: {provider}")
 
 
-def send_admin_report_if_configured(
-    tracker: TokenTracker,
-    provider: str,
-    model: str,
-) -> None:
+def _get_provider_and_model() -> Tuple[str, str]:
     """
-    Envia por email o 'relatório admin' (tokens, custo, modelo, provider),
-    SE e somente se as variáveis de email estiverem configuradas em st.secrets.
+    resolve provider/model sem quebrar por var inexistente em eba_config.
+    prioridade:
+      1) st.secrets (LLM_PROVIDER / LLM_MODEL_ID)
+      2) eba_config (LLM_PROVIDER/LLM_MODEL_ID ou DEFAULT_PROVIDER/DEFAULT_MODEL_ID)
+      3) fallback seguro
+    """
+    # 1) secrets
+    provider = (st.secrets.get("LLM_PROVIDER", "") or "").strip()
+    model_id = (st.secrets.get("LLM_MODEL_ID", "") or "").strip()
 
-    Necessário em .streamlit/secrets.toml:
-      EMAIL_HOST
-      EMAIL_PORT (opcional, default 587)
-      EMAIL_USER
-      EMAIL_PASS
-      EMAIL_TO          -> e-mail principal (você)
-      EBA_FINANCE_TO    -> (opcional) cópia para financeiro
+    if provider and model_id:
+        return provider, model_id
+
+    # 2) config (sem crash)
+    try:
+        import eba_config as cfg  # type: ignore
+
+        provider = provider or getattr(cfg, "LLM_PROVIDER", "") or getattr(cfg, "DEFAULT_PROVIDER", "")
+        model_id = model_id or getattr(cfg, "LLM_MODEL_ID", "") or getattr(cfg, "DEFAULT_MODEL_ID", "")
+    except Exception:
+        pass
+
+    # 3) fallback final
+    provider = (provider or "groq").strip()
+    model_id = (model_id or "llama-3.1-8b-instant").strip()
+    return provider, model_id
+
+
+# =============================================================================
+# email admin (mantido)
+# =============================================================================
+def send_admin_report_if_configured(tracker: TokenTracker, provider: str, model: str) -> None:
+    """
+    envia por email o “relatório admin” (tokens, custo, modelo, provider),
+    apenas se secrets de email existirem.
     """
     try:
         host = st.secrets.get("EMAIL_HOST", "")
@@ -171,7 +250,6 @@ def send_admin_report_if_configured(
         port = int(st.secrets.get("EMAIL_PORT", 587))
 
         if not (host and user and pwd and to):
-            # se não estiver configurado, apenas não envia
             return
 
         td = tracker.dict()
@@ -189,8 +267,7 @@ def send_admin_report_if_configured(
         ]
         for step, vals in td.items():
             linhas.append(
-                f"- {step}: total={vals['total']} "
-                f"(prompt={vals['prompt']} / completion={vals['completion']})"
+                f"- {step}: total={vals['total']} (prompt={vals['prompt']} / completion={vals['completion']})"
             )
         linhas.append("")
         linhas.append(f"Total de tokens: {total_tokens}")
@@ -202,7 +279,6 @@ def send_admin_report_if_configured(
         msg["Subject"] = "[EBA] Relatório processado (uso de tokens)"
         msg["From"] = user
 
-        # To principal + cópia para financeiro (se existir)
         destinatarios = [to]
         if finance_to:
             destinatarios.append(finance_to)
@@ -214,12 +290,14 @@ def send_admin_report_if_configured(
             server.starttls()
             server.login(user, pwd)
             server.send_message(msg)
+
     except Exception as e:
-        # não quebra o app – só avisa se estiver na tela
-        st.warning(f"Falha ao enviar email de log admin: {e}")
+        st.warning(f"falha ao enviar email de log admin: {e}")
 
 
-# ======== PROMPTS ========
+# =============================================================================
+# prompts
+# =============================================================================
 EXTRACTION_PROMPT = """Você é um especialista em análise de relatórios BFA (Big Five Analysis) para seleção de talentos.
 Sua tarefa: extrair dados do relatório abaixo e retornar APENAS um JSON válido, sem texto adicional.
 
@@ -240,7 +318,7 @@ ESTRUTURA OBRIGATÓRIA:
   "competencias_ms": [
     {
       "nome": "string",
-      "nota": número (0-100 se estiver em percentil, 0-10 se estiver em escala 0-10)",
+      "nota": número,
       "classificacao": "string"
     }
   ],
@@ -252,185 +330,180 @@ ESTRUTURA OBRIGATÓRIA:
     }
   ],
   "indicadores_saude_emocional": {
-    "ansiedade": 0-100 ou null,
-    "irritabilidade": 0-100 ou null,
-    "estado_animo": 0-100 ou null,
-    "impulsividade": 0-100 ou null
+    "ansiedade": número 0-100 ou null,
+    "irritabilidade": número 0-100 ou null,
+    "estado_animo": número 0-100 ou null,
+    "impulsividade": número 0-100 ou null
   },
   "potencial_lideranca": "BAIXO" | "MÉDIO" | "ALTO" ou null,
-  "integridade_fgi": 0-100 ou null,
-  "resumo_qualitativo": "texto original do relatório",
-  "pontos_fortes": ["3-5 itens"],
-  "pontos_atencao": ["2-4 itens"],
-  "fit_geral_cargo": 0-100
+  "integridade_fgi": número 0-100 ou null,
+  "resumo_qualitativo": "texto do resumo presente no relatório",
+  "pontos_fortes": ["lista de 3-5 pontos"],
+  "pontos_atencao": ["lista de 2-4 pontos"],
+  "fit_geral_cargo": número 0-100
 }
 
-REGRAS GERAIS:
-1) Normalize percentis quando necessário. Quando o relatório trouxer percentis 0-100 para Big Five, converta para escala 0-10 (ex.: 60 -> 6.0).
-2) Big Five: use os nomes acima. Se o relatório usar variações (por ex. "Extroversão" com acento), mapeie para o campo correspondente.
-3) Use null quando a informação não existir.
-4) O campo fit_geral_cargo (0-100) deve ser um indicador bruto de adequação geral ao cargo baseado no conteúdo do laudo para o cargo: {cargo}.
-5) Quando possível, extraia também o nome da EMPRESA (cliente) do laudo e preencha em candidato.empresa. Se não houver, use null.
+REGRAS DE EXTRAÇÃO:
+1. normalize percentis/notas para escalas apropriadas
+2. big five: percentil 60 -> ~6.0/10
+3. extraia todas as competências ms que aparecerem
+4. use null quando não houver informação confiável
+5. resumo_qualitativo deve ser o texto original do relatório
+6. pontos_fortes: melhores características (notas altas)
+7. pontos_atencao: áreas de desenvolvimento (notas baixas)
+8. fit_geral_cargo: calcule compatibilidade 0-100 baseado no cargo: {cargo}
 
 RELATÓRIO:
-\"\"\"{text}\"\"\"
+\"\"\"
+{text}
+\"\"\"
 
+CONTEXTO ADICIONAL (materiais de treinamento):
+\"\"\"
+{training_context}
+\"\"\"
 
-MATERIAIS (opcional):
-\"\"\"{training_context}\"\"\"
-
-
-Retorne apenas o JSON puro.
+retorne apenas o json, sem markdown, sem explicações.
 """
 
-ANALYSIS_PROMPT = """Você é um consultor sênior de RH especializado em análise comportamental aplicada a seleção de talentos.
+ANALYSIS_PROMPT = """Você é um consultor sênior de RH especializado em análise comportamental e fit cultural.
 
-Cargo avaliado: {cargo}
+Baseado nos dados extraídos do BFA, faça uma análise profissional para o cargo: {cargo}
 
-DADOS (JSON extraído):
+DADOS DO CANDIDATO:
 {json_data}
 
 PERFIL IDEAL DO CARGO:
 {perfil_cargo}
 
-REGRAS PARA CÁLCULO DE FIT E INTERPRETAÇÃO (SIGA COM ATENÇÃO):
-
-1) BIG FIVE COMO BASE:
-   - Extroversão, Simpatia/Amabilidade e Inovação (normalmente ligada a Abertura) são as principais dimensões positivas para o FIT.
-     Quanto maiores esses indicadores (dentro da régua do laudo), maior tende a ser a compatibilidade.
-   - Neuroticismo: quanto MENOR, melhor. Este é um eixo crítico. Neuroticismo elevado deve REDUZIR fortemente a compatibilidade.
-
-2) RESILIÊNCIA E EMOÇÃO:
-   - Considere facetas/competências ligadas a Resiliência e Emoção (ou rótulos equivalentes).
-   - Ideal: IGUAL OU MENOR QUE 55 pontos na régua, quando a régua for 0-100.
-   - Quanto menor a pontuação em "Resiliência e Emoção" (quando esta representa vulnerabilidade emocional), melhor para o FIT.
-   - Se o relatório tratar Resiliência como algo positivo (maior = mais resiliente), interprete de forma coerente, mas respeitando a intenção:
-     aqui a regra é: altas vulnerabilidades emocionais reduzem o FIT.
-
-3) AUTOGESTÃO E DESEMPENHO:
-   - Competências de Autogestão e Desempenho (ou nomes muito próximos) são eixos positivos.
-   - Quanto MAIOR a nota, melhor.
-   - Notas baixas nesses eixos devem ser destacadas como ponto crítico.
-
-4) PRODUTIVIDADE E DINAMISMO:
-   - Competências ou indicadores com esses nomes (ou variações próximas) devem ser tratados como positivos.
-   - Quanto MAIOR a nota, melhor.
-
-5) COMPATIBILIDADE_GERAL (0-100):
-   - Deve ser calculada principalmente a partir de:
-       * Extroversão, Amabilidade/Simpatia, Inovação/Abertura (para cima)
-       * Neuroticismo (para baixo)
-       * Resiliência/Emoção conforme explicado acima
-       * Autogestão, Desempenho, Produtividade e Dinamismo (quanto maior, melhor)
-   - Use o perfil ideal do cargo como referência (perfil_cargo) para calibrar esse valor.
-   - 0-39 → compatibilidade baixa
-     40-69 → compatibilidade moderada
-     70-100 → compatibilidade alta
-
-6) DECISÃO:
-   - "RECOMENDADO" → compatibilidade_geral geralmente >= 70, sem riscos críticos inaceitáveis.
-   - "RECOMENDADO COM RESSALVAS" → compatibilidade_geral intermediária ou com pontos de atenção claros mas gerenciáveis.
-   - "NÃO RECOMENDADO" → compatibilidade_geral baixa ou riscos elevados (ex.: Neuroticismo muito alto, vulnerabilidade emocional grave, baixa Autogestão, etc.).
-
-Responda em JSON no formato abaixo (NÃO inclua comentários):
+Retorne como JSON estruturado seguindo este formato:
 
 {
-  "compatibilidade_geral": 0-100,
+  "compatibilidade_geral": número 0-100,
   "decisao": "RECOMENDADO" | "RECOMENDADO COM RESSALVAS" | "NÃO RECOMENDADO",
-  "justificativa_decisao": "texto",
+  "justificativa_decisao": "parágrafo explicativo",
   "analise_tracos": {
-    "Abertura": "texto",
-    "Conscienciosidade": "texto",
-    "Extroversao": "texto",
-    "Amabilidade": "texto",
-    "Neuroticismo": "texto (reforçando que quanto menor, melhor)"
+    "Abertura": "análise específica",
+    "Conscienciosidade": "análise específica",
+    "Extroversao": "análise específica",
+    "Amabilidade": "análise específica",
+    "Neuroticismo": "análise específica"
   },
   "competencias_criticas": [
-    {
-      "competencia": "nome",
-      "avaliacao": "texto",
-      "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"
-    }
+    {"competencia": "nome", "avaliacao": "texto", "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"}
   ],
-  "saude_emocional_contexto": "texto",
-  "recomendacoes_desenvolvimento": ["a","b","c"],
+  "saude_emocional_contexto": "parágrafo",
+  "recomendacoes_desenvolvimento": ["recomendação 1", "recomendação 2"],
   "cargos_alternativos": [
-    {
-      "cargo":"nome",
-      "justificativa":"texto"
-    }
+    {"cargo": "nome", "justificativa": "por que seria melhor"}
   ],
-  "resumo_executivo": "100-150 palavras"
+  "resumo_executivo": "parágrafo de 100-150 palavras para decisores"
 }
+
+responda estritamente em json. sem texto fora do json. sem markdown.
 """
+
+
+# =============================================================================
+# core LLM call
+# =============================================================================
+_JSON_RE = re.compile(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", re.DOTALL)
+
+
+def _extract_first_json(text: str) -> Optional[Dict[str, Any]]:
+    if not text:
+        return None
+    m = _JSON_RE.search(text)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+def _looks_like_rate_limit(err: Exception) -> bool:
+    s = str(err).lower()
+    return ("rate limit" in s) or ("429" in s) or ("too many requests" in s) or ("rate_limit" in s)
 
 
 def _chat_completion_json(
     provider: str,
     client: Any,
-    model: str,
+    model_id: str,
     messages: List[Dict[str, str]],
-    force_json: bool = True,
-) -> Tuple[str, Optional[Dict[str, int]]]:
-    usage: Optional[Dict[str, int]] = None
-    pv = (provider or "groq").lower()
+    force_json: bool,
+    max_retries: int = 3,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    retorna (content, usage_dict)
+    - em groq/openai o sdk costuma expor resp.usage com prompt_tokens/completion_tokens
+    """
+    last_err: Optional[Exception] = None
 
-    if pv == "groq":
-        kwargs: Dict[str, Any] = dict(
-            model=model,
-            messages=messages,
-            max_tokens=MAX_TOKENS_FIXED,
-            temperature=TEMP_FIXED,
-        )
-        if force_json:
-            kwargs["response_format"] = {"type": "json_object"}
-        resp = client.chat.completions.create(**kwargs)
-        content = resp.choices[0].message.content.strip()
-        u = getattr(resp, "usage", None)
-        if u:
-            usage = {
-                "prompt_tokens": u.prompt_tokens,
-                "completion_tokens": u.completion_tokens,
-                "total_tokens": u.total_tokens,
-            }
-        return content, usage
+    for attempt in range(1, max_retries + 1):
+        try:
+            pv = (provider or "groq").lower()
 
-    # openai
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages
-        if not force_json
-        else ([{"role": "system", "content": "Responda apenas com JSON válido."}] + messages),
-        temperature=TEMP_FIXED,
-        max_tokens=MAX_TOKENS_FIXED,
-        response_format={"type": "json_object"} if force_json else None,
-    )
-    content = resp.choices[0].message.content.strip()
-    u = getattr(resp, "usage", None)
-    if u:
-        usage = {
-            "prompt_tokens": u.prompt_tokens,
-            "completion_tokens": u.completion_tokens,
-            "total_tokens": u.total_tokens,
-        }
-    return content, usage
+            if pv == "groq":
+                # groq suporta response_format={"type":"json_object"} em muitos modelos
+                kwargs = {
+                    "model": model_id,
+                    "messages": messages,
+                    "max_tokens": int(MAX_TOKENS_FIXED),
+                    "temperature": float(TEMP_FIXED),
+                }
+                if force_json:
+                    kwargs["response_format"] = {"type": "json_object"}
+
+                resp = client.chat.completions.create(**kwargs)
+                content = (resp.choices[0].message.content or "").strip()
+                usage = None
+                if getattr(resp, "usage", None):
+                    usage = {
+                        "prompt_tokens": getattr(resp.usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(resp.usage, "completion_tokens", 0),
+                    }
+                return content, usage
+
+            if pv == "openai":
+                kwargs = {
+                    "model": model_id,
+                    "messages": messages,
+                    "max_tokens": int(MAX_TOKENS_FIXED),
+                    "temperature": float(TEMP_FIXED),
+                }
+                if force_json:
+                    # openai: response_format pode variar conforme sdk/modelo; mantemos simples
+                    pass
+
+                resp = client.chat.completions.create(**kwargs)
+                content = (resp.choices[0].message.content or "").strip()
+                usage = None
+                if getattr(resp, "usage", None):
+                    usage = {
+                        "prompt_tokens": getattr(resp.usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(resp.usage, "completion_tokens", 0),
+                    }
+                return content, usage
+
+            raise RuntimeError(f"provedor não suportado: {provider}")
+
+        except Exception as e:
+            last_err = e
+            if _looks_like_rate_limit(e) and attempt < max_retries:
+                # backoff curto
+                sleep_s = min(8.0, 1.2 * (2 ** (attempt - 1)))
+                time.sleep(sleep_s)
+                continue
+            break
+
+    raise RuntimeError(f"falha na chamada llm: {last_err}")
 
 
-def _estimate_and_add(
-    tracker: TokenTracker,
-    step: str,
-    messages: List[Dict[str, str]],
-    content: str,
-    usage: Optional[Dict[str, int]],
-) -> None:
-    if usage:
-        tracker.add(step, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
-        return
-    prompt_text = "\n".join([m.get("content", "") for m in messages])
-    tracker.add(step, _estimate_tokens(prompt_text), _estimate_tokens(content))
-
-
-# ======== CORE: extração / análise / chat ========
+# =============================================================================
+# business functions
+# =============================================================================
 def extract_bfa_data(
     text: str,
     cargo: str,
@@ -438,34 +511,46 @@ def extract_bfa_data(
     provider: str,
     model_id: str,
     token: str,
-    tracker: TokenTracker,
-):
-    """Etapa 1: extração em JSON estruturado."""
-    try:
-        client = get_llm_client_cached(provider, token)
-    except Exception as e:
-        return None, f"[Erro cliente] {e}"
+    tracker: Any,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """etapa 1: extração estruturada."""
+    client = get_llm_client_cached(provider, token)
+
+    # limites conservadores (prod)
+    text_limit = 12000
+    training_limit = 3000
 
     prompt = (
-        EXTRACTION_PROMPT.replace("{text}", text[:10000])
-        .replace("{training_context}", training_context[:3000])
-        .replace("{cargo}", cargo)
+        EXTRACTION_PROMPT.replace("{cargo}", cargo)
+        .replace("{text}", (text or "")[:text_limit])
+        .replace("{training_context}", (training_context or "")[:training_limit])
     )
 
-    messages = [{"role": "user", "content": prompt}]
-    try:
-        content, usage = _chat_completion_json(provider, client, model_id.strip(), messages, True)
-        _estimate_and_add(tracker, "extracao", messages, content, usage)
+    messages = [
+        {"role": "system", "content": "responda estritamente em json."},
+        {"role": "user", "content": prompt},
+    ]
 
-        try:
-            return json.loads(content), content
-        except Exception:
-            m = re.search(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", content, re.DOTALL)
-            if m:
-                return json.loads(m.group(0)), content
-            return None, f"Nenhum JSON válido encontrado: {content[:800]}..."
-    except Exception as e:
-        return None, f"[Erro LLM] {e}"
+    content, usage = _chat_completion_json(provider, client, model_id.strip(), messages, True)
+    _estimate_and_add(tracker, "extracao", messages, content, usage)
+
+    parsed = _extract_first_json(content)
+    if parsed is not None:
+        return parsed, content
+
+    # tentativa de “repair”
+    fix_msgs = [
+        {"role": "system", "content": "retorne apenas o json válido."},
+        {"role": "user", "content": f"converta para json válido:\n{content}"},
+    ]
+    fix, usage2 = _chat_completion_json(provider, client, model_id.strip(), fix_msgs, True)
+    _estimate_and_add(tracker, "extracao", fix_msgs, fix, usage2)
+
+    parsed2 = _extract_first_json(fix)
+    if parsed2 is not None:
+        return parsed2, fix
+
+    return None, f"nenhum json válido encontrado: {content[:800]}..."
 
 
 def analyze_bfa_data(
@@ -475,13 +560,10 @@ def analyze_bfa_data(
     provider: str,
     model_id: str,
     token: str,
-    tracker: TokenTracker,
-):
-    """Etapa 2: análise de compatibilidade/fit."""
-    try:
-        client = get_llm_client_cached(provider, token)
-    except Exception as e:
-        return None, f"[Erro cliente] {e}"
+    tracker: Any,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """etapa 2: análise de compatibilidade/fit."""
+    client = get_llm_client_cached(provider, token)
 
     prompt = (
         ANALYSIS_PROMPT.replace("{cargo}", cargo)
@@ -490,28 +572,29 @@ def analyze_bfa_data(
     )
 
     messages = [
-        {"role": "system", "content": "Responda estritamente em JSON."},
+        {"role": "system", "content": "responda estritamente em json."},
         {"role": "user", "content": prompt},
     ]
-    try:
-        content, usage = _chat_completion_json(
-            provider, client, model_id.strip(), messages, True
-        )
-        _estimate_and_add(tracker, "analise", messages, content, usage)
-        try:
-            return json.loads(content), content
-        except Exception:
-            fix_prompt_msgs = [
-                {"role": "system", "content": "Retorne apenas o JSON válido."},
-                {"role": "user", "content": f"Converta para JSON válido:\n{content}"},
-            ]
-            fix, usage2 = _chat_completion_json(
-                provider, client, model_id.strip(), fix_prompt_msgs, True
-            )
-            _estimate_and_add(tracker, "analise", fix_prompt_msgs, fix, usage2)
-            return json.loads(fix), fix
-    except Exception as e:
-        return None, f"[Erro durante análise] {e}"
+
+    content, usage = _chat_completion_json(provider, client, model_id.strip(), messages, True)
+    _estimate_and_add(tracker, "analise", messages, content, usage)
+
+    parsed = _extract_first_json(content)
+    if parsed is not None:
+        return parsed, content
+
+    fix_msgs = [
+        {"role": "system", "content": "retorne apenas o json válido."},
+        {"role": "user", "content": f"converta para json válido:\n{content}"},
+    ]
+    fix, usage2 = _chat_completion_json(provider, client, model_id.strip(), fix_msgs, True)
+    _estimate_and_add(tracker, "analise", fix_msgs, fix, usage2)
+
+    parsed2 = _extract_first_json(fix)
+    if parsed2 is not None:
+        return parsed2, fix
+
+    return None, f"nenhum json válido encontrado: {content[:800]}..."
 
 
 def chat_with_elder_brain(
@@ -522,38 +605,72 @@ def chat_with_elder_brain(
     provider: str,
     model_id: str,
     token: str,
-    tracker: TokenTracker,
+    tracker: Any,
 ) -> str:
-    """
-    Chat contextualizado com o relatório + análise.
-    OBS: a parte de UI de chat pode ser removida; esta função é mantida apenas
-    para eventual uso futuro ou debug.
-    """
-    try:
-        client = get_llm_client_cached(provider, token)
-    except Exception as e:
-        return f"Erro ao conectar com a IA: {e}"
+    """chat contextualizado (mantido para evolução futura)."""
+    client = get_llm_client_cached(provider, token)
 
     contexto = f"""
-Você é um consultor executivo de RH analisando um relatório BFA.
+você é um consultor executivo de rh analisando um relatório bfa.
 
-DADOS (JSON): {json.dumps(bfa_data, ensure_ascii=False)}
-ANÁLISE (JSON): {json.dumps(analysis, ensure_ascii=False)}
-CARGO: {cargo}
+dados (json): {json.dumps(bfa_data, ensure_ascii=False)}
+análise (json): {json.dumps(analysis, ensure_ascii=False)}
+cargo: {cargo}
 
-PERGUNTA: {question}
-Responda de forma objetiva e profissional.
+pergunta: {question}
+responda de forma objetiva e profissional.
 """.strip()
 
     messages = [{"role": "user", "content": contexto}]
+    content, usage = _chat_completion_json(provider, client, model_id.strip(), messages, False)
+    _estimate_and_add(tracker, "chat", messages, content, usage)
+    return content
+
+
+# =============================================================================
+# wrappers usados pelo app.py
+# =============================================================================
+def run_extracao(text: str, cargo: str, tracker: Any):
+    provider, model_id = _get_provider_and_model()
+    api_key = get_api_key_for_provider(provider)
+
+    bfa_data, raw = extract_bfa_data(
+        text=text,
+        cargo=cargo,
+        training_context="",
+        provider=provider,
+        model_id=model_id,
+        token=api_key,
+        tracker=tracker,
+    )
+
+    if bfa_data is None:
+        raise RuntimeError(raw or "falha na extração.")
+    return bfa_data
+
+
+def run_analise(bfa_data: dict, cargo: str, tracker: Any):
+    provider, model_id = _get_provider_and_model()
+    api_key = get_api_key_for_provider(provider)
+
+    # perfil do cargo (se existir no config)
     try:
-        content, usage = _chat_completion_json(
-            provider, client, model_id.strip(), messages, False
-        )
-        _estimate_and_add(tracker, "chat", messages, content, usage)
-        return content
-    except Exception as e:
-        msg = f"Erro na resposta da IA: {e}"
-        if hasattr(e, "response") and getattr(e.response, "text", None):
-            msg += f" - Detalhes: {e.response.text}"
-        return msg
+        from eba_config import gerar_perfil_cargo_dinamico  # type: ignore
+
+        perfil_cargo = gerar_perfil_cargo_dinamico(cargo)
+    except Exception:
+        perfil_cargo = {}
+
+    analysis, raw = analyze_bfa_data(
+        bfa_data=bfa_data,
+        cargo=cargo,
+        perfil_cargo=perfil_cargo,
+        provider=provider,
+        model_id=model_id,
+        token=api_key,
+        tracker=tracker,
+    )
+
+    if analysis is None:
+        raise RuntimeError(raw or "falha na análise.")
+    return analysis

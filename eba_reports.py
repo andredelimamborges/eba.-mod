@@ -34,9 +34,12 @@ COLOR_GOOD = "#15803D"  # verde escuro
 COLOR_BAD = "#B91C1C"   # vermelho escuro
 
 # export de imagens plotly
-PLOT_EXPORT_W = 1200
-PLOT_EXPORT_H = 820
-PLOT_EXPORT_SCALE = 2
+# PROD NOTE: imagens grandes + escala alta podem estourar a área útil do A4
+# e acabar "cortando" no PDF (principalmente em páginas com pouco espaço restante).
+# Mantemos boa qualidade, mas reduzimos um pouco a área/escala para caber com folga.
+PLOT_EXPORT_W = 1000
+PLOT_EXPORT_H = 680
+PLOT_EXPORT_SCALE = 1
 
 
 # =========================
@@ -264,7 +267,6 @@ class PDFReport(FPDF):
     def _safe(self, s: Optional[str]) -> str:
         s = s or ""
 
-        # normaliza alguns caracteres “problemáticos”
         rep = {
             "\u2014": "-",
             "\u2013": "-",
@@ -274,13 +276,12 @@ class PDFReport(FPDF):
             "\u201d": '"',
             "\u2026": "...",
             "\u00a0": " ",
-            "\u2022": "-",   # bullet
-            "\u25cf": "-",   # bullet
+            "\u2022": "-",
+            "\u25cf": "-",
         }
         for k, v in rep.items():
             s = s.replace(k, v)
 
-        # quebra tokens longos (URLs, hashes, etc)
         def _break_long_tokens(text: str, max_len: int = 80) -> str:
             def _split(m):
                 t = m.group(0)
@@ -290,7 +291,6 @@ class PDFReport(FPDF):
 
         s = _break_long_tokens(s, 80)
 
-        # encoding seguro
         try:
             return s if self._unicode else s.encode("latin-1", "ignore").decode("latin-1")
         except Exception:
@@ -321,20 +321,16 @@ class PDFReport(FPDF):
         if self.page_no() == 1:
             return
         self.set_font(self._family, "B", 10)
-        self.set_text_color(107, 114, 128)  # cinza
+        self.set_text_color(107, 114, 128)
         self.safe_cell(0, 8, "Elder Brain Analytics — Relatório Corporativo", align="C", ln=1)
         self.set_text_color(0, 0, 0)
 
     def footer(self) -> None:
-        # rodapé real: sempre no final, nunca “empurra” conteúdo
         self.set_y(-16)
         self.set_font(self._family, "", 7)
         self.set_text_color(107, 114, 128)
-
-        # texto do rodapé (1 linha “quase sempre”). se quebrar, tudo bem: está na margem do footer.
         self.safe_multi_cell(0, 3.2, FOOTER_TEXT, align="C")
 
-        # paginação abaixo (fixo)
         self.set_y(-6.5)
         self.set_font(self._family, "", 7)
         self.safe_cell(0, 3, f"Página {self.page_no()}", align="C")
@@ -345,12 +341,11 @@ class PDFReport(FPDF):
         x1 = self.l_margin
         x2 = self.w - self.r_margin
         y = self.get_y()
-        self.set_draw_color(209, 213, 219)  # border cinza claro
+        self.set_draw_color(209, 213, 219)
         self.line(x1, y, x2, y)
         self.ln(space)
 
     def heading(self, title: str) -> None:
-        # faixa de título formal
         self.set_fill_color(44, 16, 156)
         self.set_text_color(255, 255, 255)
         self.set_font(self._family, "B", 12)
@@ -366,7 +361,6 @@ class PDFReport(FPDF):
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
 
-        # topo
         self.set_fill_color(44, 16, 156)
         self.rect(0, 0, self.w, 26, "F")
 
@@ -397,23 +391,54 @@ class PDFReport(FPDF):
 # =========================
 # LAYOUT HELPERS
 # =========================
-def _centered_image(pdf: PDFReport, image_path: str, max_width_mm: float = 160, space_after: float = 3.0) -> None:
+def _centered_image(
+    pdf: PDFReport,
+    image_path: str,
+    max_width_mm: float = 160,
+    space_after: float = 3.0,
+    top_padding_mm: float = 2.0,
+) -> None:
+    """
+    Insere imagem centralizada respeitando a área útil da página.
+
+    Correção PROD (PDF cortando gráficos): o FPDF não "reserva" espaço automaticamente
+    para imagens antes de desenhá-las, então precisamos estimar a altura e paginar
+    quando não houver espaço suficiente.
+    """
     if not image_path or not os.path.exists(image_path):
         return
 
     page_width = pdf.w - pdf.l_margin - pdf.r_margin
-    w = min(max_width_mm, page_width)
-    x = (pdf.w - w) / 2
+    w_mm = min(max_width_mm, page_width)
+    x_mm = (pdf.w - w_mm) / 2
 
-    # evita corte por falta de espaço
-    if pdf.get_y() > (pdf.h - 80):
+    # estima altura do PNG em mm
+    h_mm_est: Optional[float] = None
+    try:
+        from PIL import Image  # pillow (recomendado para prod)
+        with Image.open(image_path) as im:
+            px_w, px_h = im.size
+        if px_w > 0:
+            h_mm_est = (w_mm * float(px_h)) / float(px_w)
+    except Exception:
+        h_mm_est = None
+
+    # fallback conservador
+    if h_mm_est is None:
+        h_mm_est = 70.0
+
+    footer_guard = 18.0
+    remaining = (pdf.h - footer_guard) - pdf.get_y()
+    required = top_padding_mm + h_mm_est + space_after
+
+    if required > remaining:
         pdf.add_page()
 
     try:
-        pdf.image(image_path, x=x, w=w)
+        pdf.ln(top_padding_mm)
+        pdf.image(image_path, x=x_mm, w=w_mm, h=h_mm_est)
         pdf.ln(space_after)
     except Exception:
-        # se algo der errado, não quebra o PDF
         pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
 
 
@@ -535,7 +560,6 @@ def gerar_pdf_corporativo(
         decisao = (analysis or {}).get("decisao", "N/A")
         compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
 
-        # box formal
         pdf.set_fill_color(245, 246, 248)
         pdf.set_draw_color(209, 213, 219)
         pdf.set_line_width(0.3)
@@ -567,7 +591,6 @@ def gerar_pdf_corporativo(
         # 4
         pdf.heading("4. Traços de Personalidade (Big Five)")
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
-        # lista compacta (menos espaços)
         labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
         pdf.set_font(pdf._family, "", 10)
         for k in labels:
@@ -585,7 +608,6 @@ def gerar_pdf_corporativo(
             pdf.set_font(pdf._family, "", 10)
 
         analise_tracos = (analysis or {}).get("analise_tracos", {}) or {}
-        # comentários curtos (sem deixar longo demais)
         for trait, analise_txt in analise_tracos.items():
             if analise_txt:
                 pdf.set_text_color(107, 114, 128)
@@ -605,20 +627,20 @@ def gerar_pdf_corporativo(
         comp_fig = criar_grafico_competencias((bfa_data or {}).get("competencias_ms", []) or [])
         gauge_fig = criar_gauge_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0))
 
-        # radar
+        # radar (reduzido para evitar corte)
         p_radar = fig_to_png_path(radar_fig)
         if p_radar:
-            _centered_image(pdf, p_radar, max_width_mm=155, space_after=2.0)
+            _centered_image(pdf, p_radar, max_width_mm=145, space_after=2.0)
             pdf.paragraph(_summarize_radar(traits, traits_ideais), size=9, gap=1.0)
             pdf.divider(1.5)
         else:
             pdf.paragraph("⚠️ Não foi possível exportar o radar. Instale 'kaleido' para embutir gráficos no PDF.", size=9, gap=1.0)
 
-        # competências
+        # competências (reduzido e com margem extra)
         if comp_fig:
             p_comp = fig_to_png_path(comp_fig)
             if p_comp:
-                _centered_image(pdf, p_comp, max_width_mm=170, space_after=2.0)
+                _centered_image(pdf, p_comp, max_width_mm=155, space_after=2.0, top_padding_mm=3.0)
                 pdf.paragraph(_summarize_competencias((bfa_data or {}).get("competencias_ms", []) or []), size=9, gap=1.0)
                 pdf.divider(1.5)
             else:
@@ -626,15 +648,14 @@ def gerar_pdf_corporativo(
         else:
             pdf.paragraph("Sem competências estruturadas para exibição.", size=9, gap=1.0)
 
-        # gauge fit
+        # gauge fit (reduzido)
         p_fit = fig_to_png_path(gauge_fig)
         if p_fit:
-            _centered_image(pdf, p_fit, max_width_mm=130, space_after=2.0)
+            _centered_image(pdf, p_fit, max_width_mm=115, space_after=2.0)
             pdf.paragraph(_summarize_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0)), size=9, gap=1.0)
         else:
             pdf.paragraph("⚠️ Falha ao exportar gráfico de Fit (kaleido).", size=9, gap=1.0)
 
-        # limpa imagens temporárias
         _safe_remove_file(p_radar)
         try:
             _safe_remove_file(p_comp)  # type: ignore
@@ -713,7 +734,6 @@ def gerar_pdf_corporativo(
                     pdf.safe_multi_cell(0, 5, f"  {just}")
                     pdf.set_text_color(0, 0, 0)
 
-        # saída
         out_bytes = pdf.output(dest="S")
         if isinstance(out_bytes, str):
             out_bytes = out_bytes.encode("latin-1", "replace")

@@ -1,15 +1,21 @@
-streamlit==1.40.1
-groq==0.8.0
-openai==1.55.3
-httpx==0.27.2
-pdfminer.six==20231228
+streamlit>=1.33,<2.0
+
+# LLM / APIs
+groq>=0.9.0
+openai>=1.30.0
+
+# PDF e relatórios
 fpdf2==2.8.1
-plotly==5.24.1
-kaleido==0.2.1
-pandas==2.2.3
-numpy==2.1.3
-tiktoken==0.8.0
-requests==2.32.3
-pandas
-openpyxl
-xlsxwriter
+pdfminer.six>=20231228
+plotly>=5.20.0
+kaleido>=0.2.1
+Pillow>=10.2.0
+
+# Dados / planilhas
+pandas>=2.1.0
+openpyxl>=3.1.2
+xlsxwriter>=3.2.0
+
+# Utilidades
+requests>=2.31.0
+tiktoken>=0.7.0

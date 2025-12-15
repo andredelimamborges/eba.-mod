@@ -1,221 +1,146 @@
 # app.py
 from __future__ import annotations
 
-import io
-import os
 import re
-import time
-from typing import Dict, Any
+from datetime import datetime
 
 import streamlit as st
-import pandas as pd
 
-from eba_llm import run_extracao, run_analise
-from eba_reports import gerar_pdf_corporativo
 from eba_utils import (
     extract_text_from_pdf,
     limpar_nome_empresa,
     UsageTracker,
     send_usage_excel_if_configured,
 )
+from eba_llm import run_extracao, run_analise
+from eba_reports import gerar_pdf_corporativo
+
 
 # =========================
 # CONFIG STREAMLIT
 # =========================
 st.set_page_config(
     page_title="Elder Brain Analytics",
-    layout="wide",
+    page_icon="🧠",
+    layout="centered",
 )
 
 st.title("🧠 Elder Brain Analytics")
-st.caption("Análise comportamental e apoio estruturado à decisão")
+st.caption("Avaliação comportamental avançada com suporte de IA")
+
 
 # =========================
-# SESSION STATE
+# INPUTS
 # =========================
-if "resultado" not in st.session_state:
-    st.session_state.resultado = None
-
-if "bfa_data" not in st.session_state:
-    st.session_state.bfa_data = None
-
-if "analysis" not in st.session_state:
-    st.session_state.analysis = None
-
-if "pdf_buffer" not in st.session_state:
-    st.session_state.pdf_buffer = None
-
-# =========================
-# FORMULÁRIO
-# =========================
-with st.form("form_principal"):
-    st.subheader("📄 Envio do Laudo")
-
+with st.form("eba_form"):
+    email_analista = st.text_input("E-mail do Analista", placeholder="analista@empresa.com")
+    cargo = st.text_input("Cargo Avaliado", placeholder="Ex: Engenheiro de Software Pleno")
     uploaded_file = st.file_uploader(
-        "Envie o laudo em PDF",
-        type=["pdf"],
+        "Upload do relatório BFA (PDF ou TXT)",
+        type=["pdf", "txt"],
         accept_multiple_files=False,
     )
+    submitted = st.form_submit_button("Processar Relatório")
 
-    st.subheader("🏢 Dados do Analista / Empresa")
-
-    email_empresarial = st.text_input(
-        "Email empresarial *",
-        placeholder="nome@empresa.com",
-    )
-
-    cargo = st.text_input(
-        "Cargo avaliado",
-        placeholder="Ex: Engenheiro de Software",
-    )
-
-    submitted = st.form_submit_button("🚀 Processar Laudo")
 
 # =========================
-# VALIDAÇÕES
+# PROCESSAMENTO
 # =========================
 if submitted:
+    # validações básicas
     if not uploaded_file:
-        st.error("Envie um arquivo PDF para continuar.")
+        st.error("Por favor, envie um relatório BFA.")
         st.stop()
 
-    if not email_empresarial or "@" not in email_empresarial:
-        st.error("Informe um email empresarial válido.")
-        st.stop()
-
-    if not cargo:
+    if not cargo.strip():
         st.error("Informe o cargo avaliado.")
         st.stop()
 
-    # =========================
-    # EXTRAÇÃO DO PDF
-    # =========================
-    with st.spinner("📥 Extraindo informações do laudo..."):
-        try:
-            laudo_texto = extract_text_from_pdf(uploaded_file)
-        except Exception as e:
-            st.error(f"Falha ao extrair texto do PDF: {e}")
-            st.stop()
+    with st.spinner("Lendo relatório..."):
+        texto_laudo = extract_text_from_pdf(uploaded_file)
 
-    # tenta extrair empresa do texto
-    empresa_raw = ""
+    if not texto_laudo.strip():
+        st.error("Não foi possível extrair texto do relatório.")
+        st.stop()
+
+    # tentativa simples de extrair empresa do texto
     empresa_match = re.search(
         r"(empresa|organização|companhia)\s*[:\-]\s*(.+)",
-        laudo_texto,
+        texto_laudo,
         re.IGNORECASE,
     )
-    if empresa_match:
-        empresa_raw = empresa_match.group(2)
-
+    empresa_raw = empresa_match.group(2) if empresa_match else ""
     empresa = limpar_nome_empresa(empresa_raw)
 
-    # =========================
-    # TRACKER DE USO
-    # =========================
+    # tracker único da execução
     tracker = UsageTracker(
         provider="groq",
-        email=email_empresarial,
+        email=email_analista or "",
         empresa=empresa,
         cargo=cargo,
     )
 
-    # =========================
-    # EXTRAÇÃO LLM
-    # =========================
-    with st.spinner("🧠 Interpretando o laudo (extração estruturada)..."):
-        try:
+    try:
+        with st.spinner("Extraindo dados estruturados do relatório..."):
             bfa_data = run_extracao(
-                text=laudo_texto,
+                text=texto_laudo,
+                cargo=cargo,
                 tracker=tracker,
             )
-        except Exception as e:
-            st.error(f"Falha na etapa de extração: {e}")
-            st.stop()
 
-    # =========================
-    # ANÁLISE LLM
-    # =========================
-    with st.spinner("📊 Gerando análise comportamental..."):
-        try:
+        with st.spinner("Realizando análise comportamental e fit para o cargo..."):
             analysis = run_analise(
                 bfa_data=bfa_data,
                 cargo=cargo,
                 tracker=tracker,
             )
-        except Exception as e:
-            st.error(f"Falha na etapa de análise: {e}")
-            st.stop()
 
-    # salva no session_state
-    st.session_state.bfa_data = bfa_data
-    st.session_state.analysis = analysis
+    except Exception as e:
+        st.error(f"Erro durante o processamento: {e}")
+        st.stop()
 
     # =========================
-    # GERAR PDF
+    # RESULTADOS
     # =========================
-    with st.spinner("📑 Montando relatório corporativo..."):
-        try:
-            pdf_buffer = gerar_pdf_corporativo(
-                bfa_data=bfa_data,
-                analysis=analysis,
-                cargo=cargo,
-                logo_path=None,
-            )
-            st.session_state.pdf_buffer = pdf_buffer
-        except Exception as e:
-            st.error(f"Erro ao gerar PDF: {e}")
-            st.stop()
+    st.success("Análise concluída com sucesso.")
+
+    st.subheader("📌 Decisão Geral")
+    st.write(analysis.get("decisao", "N/A"))
+    st.metric(
+        "Compatibilidade com o Cargo",
+        f"{int(analysis.get('compatibilidade_geral', 0))}%",
+    )
+
+    st.subheader("📝 Resumo Executivo")
+    st.write(analysis.get("resumo_executivo", "Resumo não disponível."))
 
     # =========================
-    # ENVIO EXCEL (USO / PREÇO)
+    # PDF
+    # =========================
+    with st.spinner("Gerando PDF corporativo..."):
+        pdf_bytes = gerar_pdf_corporativo(
+            bfa_data=bfa_data,
+            analysis=analysis,
+            cargo=cargo,
+        )
+
+    st.download_button(
+        "📄 Baixar Relatório em PDF",
+        data=pdf_bytes,
+        file_name=f"EBA_Relatorio_{cargo.replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.pdf",
+        mime="application/pdf",
+    )
+
+    # =========================
+    # USO / FINANCEIRO
     # =========================
     send_usage_excel_if_configured(
         tracker=tracker,
-        email_analista=email_empresarial,
+        email_analista=email_analista,
         cargo=cargo,
     )
 
-    st.success("✅ Análise concluída com sucesso.")
-
-# =========================
-# RESULTADOS (NÃO SOMEM)
-# =========================
-if st.session_state.bfa_data and st.session_state.analysis:
-    st.divider()
-    st.subheader("📊 Resultados da Análise")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("### 🎯 Big Five")
-        st.write(st.session_state.analysis.get("resumo_big_five", "—"))
-
-        st.markdown("### 💼 Competências")
-        st.write(st.session_state.analysis.get("resumo_competencias", "—"))
-
-    with col2:
-        st.markdown("### 🧘 Saúde Emocional")
-        st.write(st.session_state.analysis.get("saude_emocional_contexto", "—"))
-
-        st.markdown("### 📈 Desenvolvimento")
-        recs = st.session_state.analysis.get("recomendacoes_desenvolvimento", [])
-        if recs:
-            for r in recs:
-                st.write(f"- {r}")
-        else:
-            st.write("—")
-
-    st.markdown("### 📄 Dados Brutos")
-    st.json(st.session_state.bfa_data)
-
-# =========================
-# DOWNLOAD PDF
-# =========================
-if st.session_state.pdf_buffer:
-    st.divider()
-    st.download_button(
-        label="⬇️ Baixar Relatório PDF",
-        data=st.session_state.pdf_buffer,
-        file_name="Relatorio_Elder_Brain_Analytics.pdf",
-        mime="application/pdf",
-    )
+    # debug opcional (desativado por padrão)
+    with st.expander("🔎 Detalhes Técnicos (Uso de Tokens)"):
+        st.json(tracker.dict())
+        st.write(f"Custo estimado (tabela GPT): ${tracker.cost_usd_gpt():.4f}")
