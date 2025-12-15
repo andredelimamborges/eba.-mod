@@ -19,34 +19,79 @@ BAD = "#B91C1C"
 
 
 # =========================
-# SAFE TEXT (FPDF)
+# SAFE TEXT / WRAPPING
 # =========================
+def _break_long_tokens(t: str, max_len: int = 40) -> str:
+    """Quebra qualquer sequência sem espaço muito longa (URLs, hashes, etc.)."""
+    def _split(m):
+        w = m.group(0)
+        return " ".join(w[i:i + max_len] for i in range(0, len(w), max_len))
+    return re.sub(rf"\S{{{max_len},}}", _split, t)
+
+
 def _pdf_safe(text: str) -> str:
+    """Sanitiza unicode e garante latin-1 seguro (helvetica)."""
     if text is None:
         return ""
     s = str(text)
 
     repl = {
-        "—": "-", "–": "-", "“": '"', "”": '"', "’": "'",
-        "‘": "'", "…": "...", "\u00A0": " ", "•": "-",
+        "—": "-", "–": "-",
+        "“": '"', "”": '"',
+        "’": "'", "‘": "'",
+        "…": "...",
+        "\u00A0": " ",
+        "•": "-",
         "→": "->",
     }
     for k, v in repl.items():
         s = s.replace(k, v)
 
-    def break_long_tokens(t: str, max_len: int = 80) -> str:
-        def _split(m):
-            w = m.group(0)
-            return " ".join(w[i:i+max_len] for i in range(0, len(w), max_len))
-        return re.sub(rf"\S{{{max_len},}}", _split, t)
+    s = _break_long_tokens(s, 40)
 
-    s = break_long_tokens(s, 80)
-
+    # remove caracteres fora do latin-1 para evitar crash
     try:
         s = s.encode("latin-1", "ignore").decode("latin-1")
     except Exception:
         pass
+
     return s
+
+
+def safe_cell(pdf: FPDF, h: float, text: str, ln: int = 1, align: str = "") -> None:
+    """Cell que nunca deixa o cursor em posição inválida."""
+    pdf.set_x(pdf.l_margin)
+    pdf.cell(0, h, _pdf_safe(text), ln=ln, align=align)
+
+
+def safe_multi_cell(pdf: FPDF, h: float, text: str, w: float = 0) -> None:
+    """
+    Multi_cell à prova de crash:
+    - reseta X para margem
+    - quebra tokens longos
+    - fallback em chunks pequenos se o FPDF ainda reclamar
+    """
+    pdf.set_x(pdf.l_margin)
+    t = _pdf_safe(text)
+
+    try:
+        pdf.multi_cell(w, h, t)
+        pdf.set_x(pdf.l_margin)
+        return
+    except Exception:
+        # fallback extremo: imprimir em blocos menores
+        pdf.set_x(pdf.l_margin)
+        chunk = 120
+        for i in range(0, len(t), chunk):
+            pdf.multi_cell(w, h, t[i:i + chunk])
+            pdf.set_x(pdf.l_margin)
+
+
+def safe_list(pdf: FPDF, h: float, items: List[str]) -> None:
+    """Lista bulletproof para PDF."""
+    if not items:
+        return
+    safe_multi_cell(pdf, h, "\n".join(f"- {i}" for i in items if i), 0)
 
 
 # =========================
@@ -61,7 +106,6 @@ def criar_radar_bfa(
     def _get(trait: str) -> float:
         v = traits.get(trait)
         if v is None:
-            # fallback sem acento
             k2 = trait.replace("ã", "a").replace("ç", "c").replace("õ", "o").replace("é", "e")
             v = traits.get(k2, 0)
         try:
@@ -84,17 +128,12 @@ def criar_radar_bfa(
     if traits_ideais:
         vmax = [float(traits_ideais.get(k, (0, 10))[1]) for k in labels]
         vmin = [float(traits_ideais.get(k, (0, 10))[0]) for k in labels]
-
         fig.add_trace(go.Scatterpolar(
-            r=vmax,
-            theta=labels,
-            name="Ideal Máx",
+            r=vmax, theta=labels, name="Ideal Máx",
             line=dict(color=GOOD, dash="dash", width=2),
         ))
         fig.add_trace(go.Scatterpolar(
-            r=vmin,
-            theta=labels,
-            name="Ideal Mín",
+            r=vmin, theta=labels, name="Ideal Mín",
             line=dict(color=GOOD, dash="dash", width=2),
         ))
 
@@ -174,7 +213,7 @@ class PDFReport(FPDF):
     def footer(self):
         self.set_y(-12)
         self.set_font("Helvetica", "", 8)
-        self.cell(0, 8, _pdf_safe(f"Página {self.page_no()}"), align="C")
+        safe_cell(self, 8, f"Página {self.page_no()}", ln=0, align="C")
 
 
 def gerar_pdf_corporativo(
@@ -184,61 +223,69 @@ def gerar_pdf_corporativo(
 ) -> io.BytesIO:
     pdf = PDFReport()
 
-    # CAPA (sem página em branco)
+    # CAPA
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 15, _pdf_safe("Relatório Comportamental"), ln=1, align="C")
+    safe_cell(pdf, 15, "Relatório Comportamental", ln=1, align="C")
     pdf.set_font("Helvetica", "", 12)
-    pdf.cell(0, 10, _pdf_safe(f"Elder Brain Analytics - {cargo}"), ln=1, align="C")
+    safe_cell(pdf, 10, f"Elder Brain Analytics - {cargo}", ln=1, align="C")
     pdf.ln(6)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, _pdf_safe(f"{APP_NAME} {APP_VERSION}"), ln=1, align="C")
-    pdf.cell(0, 6, _pdf_safe(f"{datetime.now():%d/%m/%Y %H:%M}"), ln=1, align="C")
+    safe_cell(pdf, 6, f"{APP_NAME} {APP_VERSION}", ln=1, align="C")
+    safe_cell(pdf, 6, f"{datetime.now():%d/%m/%Y %H:%M}", ln=1, align="C")
 
-    # conteúdo (textual)
+    # CONTEÚDO
     pdf.add_page()
 
-    # decisão / fit
+    # Decisão / Fit
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 9, _pdf_safe("Decisão e Compatibilidade"), ln=1)
-    pdf.set_font("Helvetica", "", 11)
+    safe_cell(pdf, 9, "Decisão e Compatibilidade", ln=1)
+
     decisao = (analysis or {}).get("decisao", "N/A")
     comp = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
-    pdf.multi_cell(0, 6.5, _pdf_safe(f"Decisão: {decisao}\nCompatibilidade: {comp:.0f}%"))
-    pdf.ln(2)
 
-    # resumo executivo
+    pdf.set_font("Helvetica", "", 11)
+    safe_multi_cell(pdf, 6.5, f"Decisão: {decisao}\nCompatibilidade: {comp:.0f}%")
+
+    # Resumo
     resumo = (analysis or {}).get("resumo_executivo", "")
     if resumo:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.cell(0, 9, _pdf_safe("Resumo Executivo"), ln=1)
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe(resumo))
         pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 13)
+        safe_cell(pdf, 9, "Resumo Executivo", ln=1)
+        pdf.set_font("Helvetica", "", 11)
+        safe_multi_cell(pdf, 6.5, resumo)
 
-    # big five
+    # Big Five
+    pdf.ln(2)
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 9, _pdf_safe("Perfil Big Five"), ln=1)
+    safe_cell(pdf, 9, "Perfil Big Five", ln=1)
     pdf.set_font("Helvetica", "", 11)
+
     traits = (bfa_data or {}).get("traits_bfa", {}) or {}
     for k, v in traits.items():
         try:
-            pdf.multi_cell(0, 6.5, _pdf_safe(f"{k}: {float(v):.1f}/10"))
+            safe_multi_cell(pdf, 6.5, f"{k}: {float(v):.1f}/10")
         except Exception:
             continue
-    pdf.ln(1)
 
-    # competências
+    # Competências
+    pdf.ln(2)
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 9, _pdf_safe("Competências"), ln=1)
+    safe_cell(pdf, 9, "Competências", ln=1)
     pdf.set_font("Helvetica", "", 11)
+
     competencias = (bfa_data or {}).get("competencias_ms", []) or []
-    fortes, criticas = [], []
+    fortes: List[str] = []
+    criticas: List[str] = []
+
     for c in competencias:
         try:
             nota = float(c.get("nota", 0) or 0)
-            nome = str(c.get("nome", ""))
+            nome = str(c.get("nome", "")).strip()
         except Exception:
+            continue
+        if not nome:
             continue
         if nota >= 55:
             fortes.append(nome)
@@ -247,26 +294,27 @@ def gerar_pdf_corporativo(
 
     if fortes:
         pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe("Pontos de Força:"))
+        safe_cell(pdf, 8, "Pontos de Força:", ln=1)
         pdf.set_font("Helvetica", "", 11)
-        safe_multi_cell(pdf, 6.5, "\n".join(f"- {x}" for x in fortes), 0)
+        safe_list(pdf, 6.5, fortes)
 
     if criticas:
         pdf.ln(1)
         pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe("Pontos Críticos:"))
+        safe_cell(pdf, 8, "Pontos Críticos:", ln=1)
         pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe("\n".join(f"- {x}" for x in criticas)))
+        safe_list(pdf, 6.5, criticas)
 
-    # saúde emocional
+    # Saúde emocional
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 9, _pdf_safe("Saúde Emocional"), ln=1)
+    safe_cell(pdf, 9, "Saúde Emocional", ln=1)
     pdf.set_font("Helvetica", "", 11)
+
     saude = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
     for k, v in saude.items():
         try:
-            pdf.multi_cell(0, 6.5, _pdf_safe(f"{k.replace('_',' ').capitalize()}: {int(v)}/100"))
+            safe_multi_cell(pdf, 6.5, f"{k.replace('_',' ').capitalize()}: {int(v)}/100")
         except Exception:
             continue
 
@@ -274,25 +322,26 @@ def gerar_pdf_corporativo(
     if contexto:
         pdf.ln(2)
         pdf.set_font("Helvetica", "I", 11)
-        pdf.multi_cell(0, 6.5, _pdf_safe(contexto))
+        safe_multi_cell(pdf, 6.5, contexto)
 
-    # desenvolvimento
+    # Desenvolvimento
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 9, _pdf_safe("Recomendações de Desenvolvimento"), ln=1)
+    safe_cell(pdf, 9, "Recomendações de Desenvolvimento", ln=1)
     pdf.set_font("Helvetica", "", 11)
+
     recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
     for i, r in enumerate(recs, 1):
-        pdf.multi_cell(0, 6.5, _pdf_safe(f"{i}. {r}"))
+        safe_multi_cell(pdf, 6.5, f"{i}. {r}")
 
     cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
     if cargos_alt:
         pdf.ln(2)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe("Cargos Alternativos"), ln=1)
+        safe_cell(pdf, 8, "Cargos Alternativos", ln=1)
         pdf.set_font("Helvetica", "", 11)
         for c in cargos_alt:
-            pdf.multi_cell(0, 6.5, _pdf_safe(f"- {c.get('cargo')}: {c.get('justificativa')}"))
+            safe_multi_cell(pdf, 6.5, f"- {c.get('cargo')}: {c.get('justificativa')}")
 
     out = pdf.output(dest="S")
     if isinstance(out, str):
@@ -300,55 +349,3 @@ def gerar_pdf_corporativo(
     buf = io.BytesIO(out)
     buf.seek(0)
     return buf
-def _break_long_tokens(t: str, max_len: int = 40) -> str:
-    # quebra qualquer sequência sem espaço com mais de max_len
-    def _split(m):
-        w = m.group(0)
-        return " ".join(w[i:i+max_len] for i in range(0, len(w), max_len))
-    return re.sub(rf"\S{{{max_len},}}", _split, t)
-
-
-def _pdf_safe(text: str) -> str:
-    if text is None:
-        return ""
-    s = str(text)
-
-    repl = {
-        "—": "-", "–": "-", "“": '"', "”": '"', "’": "'",
-        "‘": "'", "…": "...", "\u00A0": " ", "•": "-",
-        "→": "->",
-    }
-    for k, v in repl.items():
-        s = s.replace(k, v)
-
-    s = _break_long_tokens(s, 40)
-
-    try:
-        s = s.encode("latin-1", "ignore").decode("latin-1")
-    except Exception:
-        pass
-    return s
-
-
-def safe_multi_cell(pdf: FPDF, h: float, text: str, w: float = 0) -> None:
-    """
-    Multi-cell à prova de crash:
-    - reseta X para a margem esquerda
-    - quebra tokens longos
-    - fallback em chunk se o FPDF ainda reclamar
-    """
-    pdf.set_x(pdf.l_margin)
-    t = _pdf_safe(text)
-
-    try:
-        pdf.multi_cell(w, h, t)
-        return
-    except Exception:
-        pass
-
-    # fallback extremo: imprime em blocos curtos
-    pdf.set_x(pdf.l_margin)
-    chunk = 120
-    for i in range(0, len(t), chunk):
-        pdf.multi_cell(w, h, t[i:i+chunk])
-        pdf.set_x(pdf.l_margin)
