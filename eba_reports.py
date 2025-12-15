@@ -11,8 +11,7 @@ from fpdf import FPDF
 
 from eba_config import APP_NAME, APP_VERSION
 
-# ========= palette (corporate) =========
-PRIMARY_RGB = (44, 16, 156)      # #2C109C
+PRIMARY_RGB = (44, 16, 156)
 DARK_RGB = (20, 20, 30)
 MUTED_RGB = (100, 100, 110)
 BG_CARD = (246, 246, 250)
@@ -24,7 +23,7 @@ BAD_RGB = (185, 28, 28)
 
 
 # =========================
-# SAFE TEXT / WRAPPING
+# SAFE TEXT / WRAP
 # =========================
 def _break_long_tokens(t: str, max_len: int = 40) -> str:
     def _split(m):
@@ -37,6 +36,7 @@ def _pdf_safe(text: str) -> str:
     if text is None:
         return ""
     s = str(text)
+
     repl = {
         "—": "-", "–": "-",
         "“": '"', "”": '"',
@@ -48,6 +48,7 @@ def _pdf_safe(text: str) -> str:
     }
     for k, v in repl.items():
         s = s.replace(k, v)
+
     s = _break_long_tokens(s, 40)
     try:
         s = s.encode("latin-1", "ignore").decode("latin-1")
@@ -69,6 +70,33 @@ def safe_multi_cell(pdf: FPDF, h: float, text: str, w: float = 0) -> None:
         for i in range(0, len(t), chunk):
             pdf.multi_cell(w, h, t[i:i + chunk])
             pdf.set_x(pdf.l_margin)
+
+
+def _set_color(pdf: FPDF, rgb):
+    pdf.set_text_color(*rgb)
+
+
+# =========================
+# RECT fallback (rounded -> rect)
+# =========================
+def _draw_card_box(pdf: FPDF, x: float, y: float, w: float, h: float, r: float = 3, style: str = "DF"):
+    """
+    Compat com versões diferentes do fpdf2:
+    - tenta rounded_rect
+    - tenta round_rect
+    - fallback: rect normal
+    """
+    if hasattr(pdf, "rounded_rect"):
+        getattr(pdf, "rounded_rect")(x, y, w, h, r, style=style)
+        return
+    if hasattr(pdf, "round_rect"):
+        getattr(pdf, "round_rect")(x, y, w, h, r, style=style)
+        return
+    # fallback
+    if style in ("F", "DF"):
+        pdf.rect(x, y, w, h, style="F")
+    if style in ("D", "DF"):
+        pdf.rect(x, y, w, h, style="D")
 
 
 # =========================
@@ -156,7 +184,7 @@ def criar_gauge_fit(valor: float) -> go.Figure:
 
 
 # =========================
-# PDF ENGINE (pretty)
+# PDF ENGINE (pretty + compat)
 # =========================
 class PDFReport(FPDF):
     def __init__(self):
@@ -169,10 +197,10 @@ class PDFReport(FPDF):
             return
         self.set_y(10)
         self.set_font("Helvetica", "B", 10)
-        self.set_text_color(*PRIMARY_RGB)
+        _set_color(self, PRIMARY_RGB)
         self.cell(0, 6, _pdf_safe("Elder Brain Analytics"), align="L")
         self.ln(0)
-        self.set_text_color(*MUTED_RGB)
+        _set_color(self, MUTED_RGB)
         self.set_font("Helvetica", "", 9)
         self.cell(0, 6, _pdf_safe(f"{APP_NAME} {APP_VERSION}"), align="R")
         self.set_draw_color(*LINE_RGB)
@@ -185,12 +213,8 @@ class PDFReport(FPDF):
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(2)
         self.set_font("Helvetica", "", 8)
-        self.set_text_color(*MUTED_RGB)
+        _set_color(self, MUTED_RGB)
         self.cell(0, 8, _pdf_safe(f"Página {self.page_no()}"), align="C")
-
-
-def _set_color(pdf: FPDF, rgb):
-    pdf.set_text_color(*rgb)
 
 
 def _section_title(pdf: FPDF, title: str, subtitle: str = ""):
@@ -210,13 +234,12 @@ def _card(pdf: FPDF, title: str, body_lines: List[str]):
     w = pdf.w - pdf.l_margin - pdf.r_margin
     y = pdf.get_y()
 
-    # estimate height
     line_h = 5.3
     h = 8 + max(1, len(body_lines)) * line_h + 6
 
     pdf.set_fill_color(*BG_CARD)
     pdf.set_draw_color(*LINE_RGB)
-    pdf.rounded_rect(x, y, w, h, 3, style="DF")
+    _draw_card_box(pdf, x, y, w, h, r=3, style="DF")
 
     pdf.set_xy(x + 6, y + 5)
     pdf.set_font("Helvetica", "B", 11)
@@ -232,7 +255,6 @@ def _card(pdf: FPDF, title: str, body_lines: List[str]):
 
 
 def _bar(pdf: FPDF, label: str, value: float, max_value: float, color_rgb):
-    """barreira bonita sem imagens"""
     value = max(0.0, min(float(value or 0), max_value))
     x = pdf.l_margin
     w = pdf.w - pdf.l_margin - pdf.r_margin
@@ -242,33 +264,23 @@ def _bar(pdf: FPDF, label: str, value: float, max_value: float, color_rgb):
     _set_color(pdf, DARK_RGB)
     pdf.cell(0, 5, _pdf_safe(f"{label}: {value:.1f}/{max_value:.0f}"), ln=1)
 
-    # track
     track_h = 4.5
     pdf.set_fill_color(235, 235, 242)
-    pdf.rounded_rect(x, y + 6, w, track_h, 2, style="F")
+    _draw_card_box(pdf, x, y + 6, w, track_h, r=2, style="F")
 
-    # fill
     fill_w = w * (value / max_value if max_value else 0)
     pdf.set_fill_color(*color_rgb)
-    if fill_w > 0:
-        pdf.rounded_rect(x, y + 6, fill_w, track_h, 2, style="F")
+    if fill_w > 0.5:
+        _draw_card_box(pdf, x, y + 6, fill_w, track_h, r=2, style="F")
 
     pdf.set_y(y + 14)
-
-
-def _tag_color(nota: float):
-    if nota < 45:
-        return BAD_RGB, "crítico"
-    if nota < 55:
-        return WARN_RGB, "atenção"
-    return GOOD_RGB, "força"
 
 
 def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], cargo: str) -> io.BytesIO:
     pdf = PDFReport()
     pdf.add_page()
 
-    # ==== capa ====
+    # CAPA
     pdf.set_y(30)
     pdf.set_font("Helvetica", "B", 22)
     _set_color(pdf, PRIMARY_RGB)
@@ -282,7 +294,6 @@ def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], ca
     _set_color(pdf, MUTED_RGB)
     pdf.cell(0, 6, _pdf_safe(f"{APP_NAME} {APP_VERSION}"), ln=1, align="C")
     pdf.cell(0, 6, _pdf_safe(f"gerado em {datetime.now():%d/%m/%Y %H:%M}"), ln=1, align="C")
-
     pdf.ln(18)
 
     decisao = (analysis or {}).get("decisao", "N/A")
@@ -294,13 +305,11 @@ def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], ca
         "observação: gráficos completos disponíveis no dashboard do sistema.",
     ])
 
-    # ==== big five ====
+    # BIG FIVE
     pdf.add_page()
-    _section_title(pdf, "perfil big five", "interpretação resumida e distribuição do perfil em relação ao cargo.")
-
+    _section_title(pdf, "perfil big five", "interpretação resumida (barras de 0 a 10).")
     traits = (bfa_data or {}).get("traits_bfa", {}) or {}
     ordem = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
-
     for k in ordem:
         v = traits.get(k)
         if v is None:
@@ -311,44 +320,33 @@ def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], ca
         except Exception:
             vv = 0.0
 
-        color = GOOD_RGB if (k == "Neuroticismo" and vv <= 5.0) else (PRIMARY_RGB if 4.5 <= vv <= 6.5 else WARN_RGB)
+        color = GOOD_RGB if (k == "Neuroticismo" and vv <= 5.0) else PRIMARY_RGB
         _bar(pdf, k, vv, 10.0, color)
 
-    # ==== competências ====
+    # COMPETÊNCIAS
     pdf.add_page()
-    _section_title(pdf, "competências", "leitura geral por competências e pontos críticos/forças.")
-
+    _section_title(pdf, "competências", "pontos críticos e forças (texto).")
     competencias = (bfa_data or {}).get("competencias_ms", []) or []
     fortes, criticas = [], []
     for c in competencias:
         nome = str(c.get("nome", "")).strip()
+        if not nome:
+            continue
         try:
             nota = float(c.get("nota", 0) or 0)
         except Exception:
             continue
-        if not nome:
-            continue
-        _, tag = _tag_color(nota)
-        line = f"{nome} — {nota:.0f}/100 ({tag})"
         if nota >= 55:
-            fortes.append(line)
+            fortes.append(f"{nome} — {nota:.0f}/100")
         elif nota < 45:
-            criticas.append(line)
+            criticas.append(f"{nome} — {nota:.0f}/100")
 
-    if fortes:
-        _card(pdf, "pontos de força", fortes[:12])
-    else:
-        _card(pdf, "pontos de força", ["nenhum ponto de força identificado acima do limiar configurado."])
+    _card(pdf, "pontos de força", fortes[:12] if fortes else ["nenhum ponto de força acima do limiar."])
+    _card(pdf, "pontos críticos", criticas[:12] if criticas else ["nenhum ponto crítico abaixo do limiar."])
 
-    if criticas:
-        _card(pdf, "pontos críticos", criticas[:12])
-    else:
-        _card(pdf, "pontos críticos", ["nenhum ponto crítico identificado abaixo do limiar configurado."])
-
-    # ==== saúde emocional ====
+    # SAÚDE EMOCIONAL
     pdf.add_page()
-    _section_title(pdf, "saúde emocional", "indicadores normalizados (0 a 100) + contextualização.")
-
+    _section_title(pdf, "saúde emocional", "indicadores normalizados (0 a 100).")
     saude = (bfa_data or {}).get("indicadores_saude_emocional", {}) or {}
     for k, v in saude.items():
         try:
@@ -362,15 +360,11 @@ def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], ca
     if contexto:
         _card(pdf, "contextualização da ia", [_pdf_safe(contexto)])
 
-    # ==== desenvolvimento ====
+    # DESENVOLVIMENTO
     pdf.add_page()
-    _section_title(pdf, "desenvolvimento", "recomendações e próximos passos sugeridos.")
-
+    _section_title(pdf, "desenvolvimento", "recomendações e próximos passos.")
     recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
-    if recs:
-        _card(pdf, "recomendações principais", [f"{i}. {r}" for i, r in enumerate(recs[:10], 1)])
-    else:
-        _card(pdf, "recomendações principais", ["não foram encontradas recomendações nesta execução."])
+    _card(pdf, "recomendações principais", [f"{i}. {r}" for i, r in enumerate(recs[:10], 1)] if recs else ["não há recomendações nesta execução."])
 
     cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
     if cargos_alt:
@@ -380,7 +374,6 @@ def gerar_pdf_corporativo(bfa_data: Dict[str, Any], analysis: Dict[str, Any], ca
     out = pdf.output(dest="S")
     if isinstance(out, str):
         out = out.encode("latin-1", "ignore")
-
     buf = io.BytesIO(out)
     buf.seek(0)
     return buf
