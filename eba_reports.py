@@ -55,6 +55,7 @@ def _norm_key(k: str) -> str:
         .replace("ê", "e")
     )
 
+
 def criar_radar_bfa(
     traits: Dict[str, Optional[float]],
     traits_ideais: Optional[Dict[str, Tuple[float, float]]] = None,
@@ -195,12 +196,80 @@ def fig_to_png_path(
     height: int = PLOT_EXPORT_H,
     scale: int = PLOT_EXPORT_SCALE,
 ) -> Optional[str]:
+    """
+    exporta figura plotly para png e retorna path temporário.
+
+    correção prod:
+    - usa export por bytes (pio.to_image / fig.to_image) e só depois escreve no disco
+    - força engine='kaleido' quando disponível
+    - mostra o erro real no streamlit (antes era silencioso)
+    """
     try:
         import plotly.io as pio
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            pio.write_image(fig, tmp.name, format="png", width=width, height=height, scale=scale)
-            return tmp.name
+    except Exception as e:
+        try:
+            st.warning(f"plotly.io indisponível para exportar imagem: {e}")
+        except Exception:
+            pass
+        return None
+
+    # tenta garantir que kaleido existe (mensagem mais útil)
+    try:
+        import kaleido  # noqa: F401
+        has_kaleido = True
     except Exception:
+        has_kaleido = False
+
+    img_bytes: Optional[bytes] = None
+    err_msgs: List[str] = []
+
+    # 1) caminho preferido: pio.to_image (bytes)
+    try:
+        img_bytes = pio.to_image(
+            fig,
+            format="png",
+            width=int(width),
+            height=int(height),
+            scale=int(scale),
+            engine="kaleido",
+        )
+    except Exception as e:
+        err_msgs.append(f"pio.to_image falhou: {e}")
+
+    # 2) fallback: fig.to_image (bytes)
+    if img_bytes is None:
+        try:
+            img_bytes = fig.to_image(
+                format="png",
+                width=int(width),
+                height=int(height),
+                scale=int(scale),
+                engine="kaleido",
+            )
+        except Exception as e:
+            err_msgs.append(f"fig.to_image falhou: {e}")
+
+    if not img_bytes:
+        # aviso explícito (antes era silencioso)
+        try:
+            base = "falha ao exportar gráfico para png."
+            if not has_kaleido:
+                base += " kaleido não está disponível no ambiente."
+            st.warning(base + (" detalhes: " + " | ".join(err_msgs[:2]) if err_msgs else ""))
+        except Exception:
+            pass
+        return None
+
+    # escreve bytes em arquivo temporário
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            tmp.write(img_bytes)
+            return tmp.name
+    except Exception as e:
+        try:
+            st.warning(f"falha ao gravar png temporário: {e}")
+        except Exception:
+            pass
         return None
 
 
@@ -253,6 +322,7 @@ FOOTER_TEXT = (
     "O Elden Brain atua como um braço direito analítico de suporte."
 )
 
+
 class PDFReport(FPDF):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -285,7 +355,7 @@ class PDFReport(FPDF):
         def _break_long_tokens(text: str, max_len: int = 80) -> str:
             def _split(m):
                 t = m.group(0)
-                chunks = [t[i:i+max_len] for i in range(0, len(t), max_len)]
+                chunks = [t[i:i + max_len] for i in range(0, len(t), max_len)]
                 return " ".join(chunks)
             return re.sub(rf"\S{{{max_len},}}", _split, text)
 
@@ -536,6 +606,10 @@ def gerar_pdf_corporativo(
             pdf.set_main_family("Montserrat", True)
         else:
             pdf.set_main_family("Helvetica", False)
+            try:
+                st.info("Fonte Montserrat não disponível no ambiente; usando Helvetica (fallback).")
+            except Exception:
+                pass
 
         # CAPA
         pdf.cover("Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
@@ -627,6 +701,11 @@ def gerar_pdf_corporativo(
         comp_fig = criar_grafico_competencias((bfa_data or {}).get("competencias_ms", []) or [])
         gauge_fig = criar_gauge_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0))
 
+        # SAFE: inicializa paths (evita variável inexistente no cleanup)
+        p_radar: Optional[str] = None
+        p_comp: Optional[str] = None
+        p_fit: Optional[str] = None
+
         # radar (reduzido para evitar corte)
         p_radar = fig_to_png_path(radar_fig)
         if p_radar:
@@ -634,7 +713,7 @@ def gerar_pdf_corporativo(
             pdf.paragraph(_summarize_radar(traits, traits_ideais), size=9, gap=1.0)
             pdf.divider(1.5)
         else:
-            pdf.paragraph("⚠️ Não foi possível exportar o radar. Instale 'kaleido' para embutir gráficos no PDF.", size=9, gap=1.0)
+            pdf.paragraph("ATENÇÃO: não foi possível exportar o radar. Verifique o kaleido para embutir gráficos no PDF.", size=9, gap=1.0)
 
         # competências (reduzido e com margem extra)
         if comp_fig:
@@ -644,7 +723,7 @@ def gerar_pdf_corporativo(
                 pdf.paragraph(_summarize_competencias((bfa_data or {}).get("competencias_ms", []) or []), size=9, gap=1.0)
                 pdf.divider(1.5)
             else:
-                pdf.paragraph("⚠️ Falha ao exportar gráfico de competências (kaleido).", size=9, gap=1.0)
+                pdf.paragraph("ATENÇÃO: falha ao exportar gráfico de competências (kaleido).", size=9, gap=1.0)
         else:
             pdf.paragraph("Sem competências estruturadas para exibição.", size=9, gap=1.0)
 
@@ -654,13 +733,11 @@ def gerar_pdf_corporativo(
             _centered_image(pdf, p_fit, max_width_mm=115, space_after=2.0)
             pdf.paragraph(_summarize_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0)), size=9, gap=1.0)
         else:
-            pdf.paragraph("⚠️ Falha ao exportar gráfico de Fit (kaleido).", size=9, gap=1.0)
+            pdf.paragraph("ATENÇÃO: falha ao exportar gráfico de Fit (kaleido).", size=9, gap=1.0)
 
+        # cleanup limpo e seguro
         _safe_remove_file(p_radar)
-        try:
-            _safe_remove_file(p_comp)  # type: ignore
-        except Exception:
-            pass
+        _safe_remove_file(p_comp)
         _safe_remove_file(p_fit)
 
         pdf.divider(2.0)
