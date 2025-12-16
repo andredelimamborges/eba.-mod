@@ -519,7 +519,7 @@ def _centered_image(
 # =========================
 import os
 
-logo_path = "assets/logo_eba.png"
+logo_path = "assets/eba.png"
 if os.path.exists(logo_path):
     try:
         page_width = pdf.w
