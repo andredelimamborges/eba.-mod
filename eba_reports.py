@@ -434,12 +434,12 @@ class PDFReport(FPDF):
         self.line(x1, y, x2, y)
         self.ln(space)
 
-    def heading(self, title: str) -> None:
-        self.set_fill_color(44, 16, 156)
-        self.set_text_color(255, 255, 255)
-        self.set_font(self._family, "B", 12)
-        self.safe_cell(0, 9, self._safe(title), ln=1, fill=True)
-        self.set_text_color(0, 0, 0)
+    def heading(self, text: str, size: int = 14):
+    # 🔧 RESETA O CURSOR PARA A MARGEM ESQUERDA
+        self.set_x(self.l_margin)
+
+        self.set_font(self._family, "B", size)
+        self.multi_cell(0, 8, text)
         self.ln(2)
 
     def paragraph(self, body: str, size: int = 10, gap: float = 1.5) -> None:
