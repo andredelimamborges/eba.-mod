@@ -29,14 +29,14 @@ def extrair_cargo_do_texto(texto: str) -> str:
     if not texto:
         return ""
 
-    # caso 1: "Cargo: alguma coisa"
+
     m = re.search(r"\bcargo\b\s*[:\-]\s*(.+)", texto, flags=re.IGNORECASE)
     if m:
         cargo = m.group(1).strip()
         cargo = cargo.split("\n")[0].strip()
         return cargo
 
-    # caso 2: bloco "Cargo" numa linha e valor na linha seguinte
+
     m = re.search(r"\bcargo\b\s*\n\s*([^\n]{2,80})", texto, flags=re.IGNORECASE)
     if m:
         return m.group(1).strip()
@@ -80,19 +80,18 @@ def classificar_competencias(lista):
 # ======================================================
 st.set_page_config(page_title="Elder Brain Analytics", page_icon="🧠", layout="wide")
 st.title("🧠 Elder Brain Analytics")
-st.caption("Avaliação comportamental avançada para tomada de decisão em RH")
+st.caption("Avaliação comportamental avançada para tomada de decisãos estratégicas.")
 
 with st.form("eba_form"):
     col1, col2, col3 = st.columns(3)
     with col1:
-        email_analista = st.text_input("e-mail do analista", placeholder="analista@empresa.com")
+        email_analista = st.text_input("E-mail do Analista", placeholder="Analista@empresa.com")
     with col2:
-        cargo_input = st.text_input("cargo avaliado", placeholder="ex: engenheiro de software pleno (opcional)")
+        cargo_input = st.text_input("Cargo Avaliado", placeholder="ex: Engenheiro de Software pleno (Obrigatório)")
     with col3:
-        empresa_input = st.text_input("empresa", placeholder="ex: ms solutions (opcional)")
-
-    uploaded_file = st.file_uploader("upload do relatório bfa (pdf ou txt)", type=["pdf", "txt"])
-    submitted = st.form_submit_button("processar relatório")
+        empresa_input = st.text_input("Empresa", placeholder="ex: MS Solutions (opcional)")
+    uploaded_file = st.file_uploader("Upload do relatório BFA ou Bol ", type=["pdf", "txt"])
+    submitted = st.form_submit_button("Processar relatório")
 
 
 # ======================================================
@@ -100,13 +99,13 @@ with st.form("eba_form"):
 # ======================================================
 if submitted:
     if not uploaded_file:
-        st.error("envie o relatório.")
+        st.error("Envie o relatório.")
         st.stop()
 
     # 1) extrai texto
     texto = extract_text_from_pdf(uploaded_file)
     if not texto.strip():
-        st.error("não foi possível extrair texto do relatório.")
+        st.error("Não foi possível extrair texto do relatório.")
         st.stop()
 
     # 2) cargo: input tem prioridade; se vazio, tenta extrair do pdf
@@ -115,7 +114,7 @@ if submitted:
         cargo_final = extrair_cargo_do_texto(texto)
 
     if not cargo_final:
-        st.error("não consegui identificar o cargo no pdf. preencha o campo 'cargo avaliado'.")
+        st.error("Não consegui identificar o cargo no PDF. Preencha o campo 'Cargo Avaliado'.")
         st.stop()
 
     # 3) empresa: input tem prioridade; se vazio, tenta extrair do texto
@@ -130,7 +129,7 @@ if submitted:
         empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
 
     if not empresa:
-        st.error("empresa é obrigatória. informe no formulário ou no relatório.")
+        st.error("Empresa é obrigatória.")
         st.stop()
 
     # 4) tracker
@@ -142,7 +141,7 @@ if submitted:
     )
 
     # 5) extração llm
-    with st.spinner("extraindo dados do relatório..."):
+    with st.spinner("Extraindo dados do relatório..."):
         bfa_data = run_extracao(text=texto, cargo=cargo_final, tracker=tracker)
 
         # garante empresa no payload (top-level e candidato)
@@ -153,11 +152,11 @@ if submitted:
             bfa_data["candidato"]["empresa"] = empresa
 
     # 6) análise llm
-    with st.spinner("analisando perfil comportamental..."):
+    with st.spinner("Analisando perfil comportamental..."):
         analysis = run_analise(bfa_data=bfa_data, cargo=cargo_final, tracker=tracker)
 
     # 7) pdf
-    with st.spinner("gerando relatório pdf..."):
+    with st.spinner("Gerando relatório PDF..."):
         pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_final)
 
     pdf_bytes = pdf_buf.getvalue() if hasattr(pdf_buf, "getvalue") else bytes(pdf_buf)
@@ -182,21 +181,20 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     cargo = st.session_state.get("cargo", "")
 
     if not cargo:
-        st.warning("sessão recarregada. refaça o processamento do relatório.")
+        st.warning("Sessão recarregada. Refaça o processamento do relatório.")
         st.stop()
 
     st.divider()
-    st.header("📊 dashboard analítico — elder brain")
-
+    st.header("📊 Dashboard analítico — Elder Brain")
     perfil = gerar_perfil_cargo_dinamico(cargo)
     traits_ideais = (perfil or {}).get("traits_ideais", {})
 
-    tabs = st.tabs(["🎯 perfil big five", "💼 competências", "🧘 saúde emocional", "📈 desenvolvimento", "📄 dados brutos"])
+    tabs = st.tabs(["🎯 Perfil Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados BrutosS"])
 
     with tabs[0]:
         traits = bfa_data.get("traits_bfa", {}) or {}
         ordem = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
-        st.subheader("🎯 perfil big five — interpretação")
+        st.subheader("🎯 Perfil Big Five — Interpretação")
         for k in ordem:
             v = traits.get(k)
             if v is None:
@@ -210,13 +208,13 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
         competencias = bfa_data.get("competencias_ms", []) or []
         fortes, criticas = classificar_competencias(competencias)
 
-        st.subheader("💼 competências — leitura geral")
+        st.subheader("💼 Competências — Leitura Geral")
         if fortes:
-            st.markdown("🔹 **pontos de força**")
+            st.markdown("🔹 **Pontos de Força**")
             for f in fortes:
                 st.write(f"• {f} — desempenho consistente para o cargo.")
         if criticas:
-            st.markdown("🔸 **pontos críticos**")
+            st.markdown("🔸 **Pontos Críticos**")
             for c in criticas:
                 st.write(f"• {c} — requer acompanhamento e plano de desenvolvimento.")
 
@@ -226,31 +224,31 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
 
     with tabs[2]:
         saude = bfa_data.get("indicadores_saude_emocional", {}) or {}
-        st.subheader("🧘 saúde emocional — justificativa completa")
+        st.subheader("🧘 Saúde Emocional — Justificativa Completa")
         for k, v in saude.items():
             if v is not None:
                 st.write(f"• **{k.replace('_',' ').capitalize()}**: {int(v)}/100 → nível saudável, dentro do esperado.")
 
         contexto = (analysis or {}).get("saude_emocional_contexto", "")
         if contexto:
-            st.markdown("**contextualização da ia**")
+            st.markdown("**Contextualização da IA**")
             st.write(contexto)
 
         st.plotly_chart(criar_gauge_fit((analysis or {}).get("compatibilidade_geral", 0)), use_container_width=True)
 
     with tabs[3]:
-        st.subheader("📈 recomendações de desenvolvimento — versão ampliada")
+        st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
         for i, rec in enumerate((analysis or {}).get("recomendacoes_desenvolvimento", []) or [], 1):
             st.write(f"{i}. {rec}")
 
-        st.markdown("**sugestões adicionais (elder brain)**")
+        st.markdown("**Sugestões Adicionais (Elder Brain)**")
         st.write("• treinamentos recomendados: inteligência emocional, comunicação assertiva, gestão de conflitos.")
         st.write("• rotina sugerida: feedback quinzenal estruturado com liderança.")
         st.write("• foco de curto prazo: trabalhar competências críticas e traços ligados à resiliência.")
 
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
-            st.markdown("**cargos alternativos sugeridos**")
+            st.markdown("**Cargos Alternativos Sugeridos**")
             for c in cargos_alt:
                 st.write(f"• **{c.get('cargo')}** — {c.get('justificativa')}")
 
@@ -259,7 +257,7 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
 
     if st.session_state.get("pdf_bytes"):
         st.download_button(
-            "📄 baixar relatório em pdf",
+            "📄 Baixar Relatório em PDF",
             data=st.session_state["pdf_bytes"],
             file_name=f"EBA_Relatorio_{cargo.replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.pdf",
             mime="application/pdf",
