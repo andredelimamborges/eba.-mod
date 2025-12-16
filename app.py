@@ -89,7 +89,7 @@ with st.form("eba_form"):
     with col2:
         cargo_input = st.text_input("Cargo Avaliado", placeholder="ex: Engenheiro de Software pleno (Obrigatório)")
     with col3:
-        empresa_input = st.text_input("Empresa", placeholder="ex: MS Solutions (opcional)")
+        empresa_input = st.text_input("Empresa", placeholder="ex: MS Solutions (obrigatório)")
     uploaded_file = st.file_uploader("Upload do relatório BFA ou Bol ", type=["pdf", "txt"])
     submitted = st.form_submit_button("Processar relatório")
 
