@@ -640,12 +640,14 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                 pass
 
         # CAPA
-        pdf.cover("Relatório Corporativo", f"Elder Brain Analytics -{cargo}")
+        pdf.cover("Relatório Corporativo", f"Elder Brain Analytics - {cargo}")
+
+        # INÍCIO DO RELATÓRIO (PÁGINA 2)
+        pdf.add_page()
 
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
 
-        
         empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
 
         # 1
@@ -660,7 +662,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             gap=1.5,
         )
         pdf.divider(2.0)
-
+        
         # 2
         pdf.heading("2. Decisão e Compatibilidade")
         decisao = (analysis or {}).get("decisao", "N/A")
