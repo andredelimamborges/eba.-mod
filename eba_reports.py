@@ -458,7 +458,7 @@ class PDFReport(FPDF):
         logo_path = "assets/logo_eba.png"
         if os.path.exists(logo_path):
             try:
-                logo_w = 60
+                logo_w = 100
                 x = (self.w - logo_w) / 2
                 y = 120
                 self.image(logo_path, x=x, y=y, w=logo_w)
