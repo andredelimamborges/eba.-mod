@@ -435,7 +435,6 @@ class PDFReport(FPDF):
         self.ln(space)
 
     def heading(self, title: str) -> None:
-        self.set_x(self.l_margin)
         self.set_fill_color(44, 16, 156)
         self.set_text_color(255, 255, 255)
         self.set_font(self._family, "B", 12)
@@ -451,9 +450,7 @@ class PDFReport(FPDF):
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
 
-        # =========================
-        # FUNDO DA CAPA (FULL PAGE - COVER REAL)
-        # =========================
+        # fundo da capa (imagem full page)
         bg_path = os.path.join(os.path.dirname(__file__), "assets", "logo_eba.png")
         if os.path.exists(bg_path):
             try:
@@ -465,7 +462,6 @@ class PDFReport(FPDF):
                 img_ratio = px_w / px_h
                 page_ratio = page_w / page_h
 
-                # cover: preenche 100% sem distorcer (corta excesso)
                 if img_ratio > page_ratio:
                     h = page_h
                     w = h * img_ratio
@@ -479,34 +475,119 @@ class PDFReport(FPDF):
             except Exception:
                 pass
 
-        # =========================
-        # TEXTO DA CAPA (PRETO, SEM DUPLICAÇÃO)
-        # =========================
+        # texto da capa (preto, sem duplicação)
         self.set_y(42)
         self.set_font(self._family, "B", 26)
         self.set_text_color(0, 0, 0)
-        self.safe_multi_cell(0, 12, "Relatório Corporativo", align="C")
+        self.multi_cell(0, 12, "Relatório Corporativo", align="C")
 
         self.ln(2)
         self.set_font(self._family, "", 14)
-        self.safe_multi_cell(0, 8, subtitulo, align="C")
+        self.multi_cell(0, 8, subtitulo, align="C")
 
         self.ln(6)
         self.set_font(self._family, "", 10)
         meta = f"Versão {APP_VERSION} - {datetime.now():%d/%m/%Y %H:%M}"
-        self.safe_multi_cell(0, 6, meta, align="C")
+        self.multi_cell(0, 6, meta, align="C")
 
-        # =========================
-        # RODAPÉ (MANTIDO)
-        # =========================
+        # rodapé
         self.set_y(self.h - 42)
         self.set_draw_color(209, 213, 219)
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(4)
         self.set_font(self._family, "I", 9)
+        self.multi_cell(0, 4.6, APP_TAGLINE, align="C")
+
         self.set_text_color(0, 0, 0)
-        self.safe_multi_cell(0, 4.6, APP_TAGLINE, align="C")
-        self.set_text_color(0, 0, 0)
+
+# =========================
+# LAYOUT HELPERS (IMAGEM)
+# =========================
+def _centered_image(
+    pdf: PDFReport,
+    image_path: str,
+    max_width_mm: float = 160,
+    space_after: float = 3.0,
+    top_padding_mm: float = 2.0,
+) -> None:
+    if not image_path or not os.path.exists(image_path):
+        return
+
+    page_width = pdf.w - pdf.l_margin - pdf.r_margin
+    w_mm = min(max_width_mm, page_width)
+    x_mm = (pdf.w - w_mm) / 2
+
+    # estima altura do PNG em mm
+    h_mm_est: Optional[float] = None
+    try:
+        from PIL import Image
+        with Image.open(image_path) as im:
+            px_w, px_h = im.size
+        if px_w > 0:
+            h_mm_est = (w_mm * float(px_h)) / float(px_w)
+    except Exception:
+        h_mm_est = None
+
+    if h_mm_est is None:
+        h_mm_est = 70.0
+
+    footer_guard = 18.0
+    remaining = (pdf.h - footer_guard) - pdf.get_y()
+    required = top_padding_mm + h_mm_est + space_after
+
+    if required > remaining:
+        pdf.add_page()
+
+    # ✅ INSERE A IMAGEM (isso aqui tinha sumido)
+    try:
+        pdf.ln(top_padding_mm)
+        pdf.image(image_path, x=x_mm, w=w_mm, h=h_mm_est)
+        pdf.ln(space_after)
+    except Exception:
+        pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
+# =========================
+# CAPA — LOGO EBA
+# =========================
+
+# =========================
+# RESUMOS (SEM LLM)
+# =========================
+def _summarize_radar(traits: Dict[str, Any], traits_ideais: Optional[Dict[str, Tuple[float, float]]]) -> str:
+    labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
+    lines = []
+    for k in labels:
+        v = traits.get(k, traits.get(_norm_key(k), None))
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except Exception:
+            continue
+
+        if traits_ideais and k in traits_ideais:
+            mn, mx = traits_ideais[k]
+            status = "dentro" if (mn <= fv <= mx) else ("acima" if fv > mx else "abaixo")
+            lines.append(f"- {k}: {fv:.1f}/10 (ideal {mn:.1f}–{mx:.1f}: {status} da faixa)")
+        else:
+            lines.append(f"- {k}: {fv:.1f}/10")
+
+    if not lines:
+        return "Não foi possível montar o resumo do radar por ausência de dados estruturados."
+    return "Resumo do gráfico (Big Five x Ideal):\n" + "\n".join(lines)
+
+
+def _summarize_competencias(competencias: List[Dict[str, Any]]) -> str:
+    if not competencias:
+        return "Resumo do gráfico (Competências): não há competências estruturadas no laudo."
+
+    df = pd.DataFrame(competencias).copy()
+    if df.empty or "nota" not in df.columns or "nome" not in df.columns:
+        return "Resumo do gráfico (Competências): formato de dados inválido."
+
+    df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
+    top = df.sort_values("nota", ascending=False).head(3)
+    low = df.sort_values("nota", ascending=True).head(3)
+
     def _fmt(row):
         return f"{str(row['nome'])} ({float(row['nota']):.0f})"
 
@@ -535,16 +616,18 @@ def _summarize_fit(score: float) -> str:
 # =========================
 # PDF PRINCIPAL
 # =========================
-def gerar_pdf_corporativo(
-    bfa_data: Dict[str, Any],
-    analysis: Dict[str, Any],
-    cargo: str,
-    save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,  # mantido por compatibilidade
-) -> io.BytesIO:
-    """
-    Gera o PDF corporativo premium.
-    """
+def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str = "", **kwargs):
+    cargo = cargo_input or ""
+    candidato = (bfa_data or {}).get("candidato", {}) or {}
+
+    empresa_pdf = (
+        empresa_override
+        or (bfa_data or {}).get("empresa")
+        or candidato.get("empresa")
+        or (bfa_data or {}).get("company")
+        or ""
+    )
+ 
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
         if _register_montserrat(pdf):
@@ -558,12 +641,11 @@ def gerar_pdf_corporativo(
 
         # CAPA
         pdf.cover("Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
-        pdf.add_page()  # inicia conteúdo após a capa
 
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
 
-        # ✅ empresa: vem do app (injeta em bfa_data["empresa"]) ou de outras integrações
+        
         empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
 
         # 1
@@ -782,14 +864,21 @@ def gerar_pdf_corporativo(
         buf = io.BytesIO(out_bytes)
         buf.seek(0)
 
-        if save_path:
+        
+        try:
+            _save_path = save_path
+        except NameError:
+            _save_path = None
+
+        if _save_path:
             try:
-                with open(save_path, "wb") as f:
+                with open(_save_path, "wb") as f:
                     f.write(buf.getbuffer())
             except Exception as e:
                 st.error(f"Erro ao salvar PDF: {e}")
 
         return buf
+
 
     except Exception as e:
         st.error(f"Erro crítico na geração do PDF: {e}")
