@@ -411,7 +411,7 @@ class PDFReport(FPDF):
             return
         self.set_font(self._family, "B", 10)
         self.set_text_color(107, 114, 128)
-        self.safe_cell(0, 8, "Elder Brain Analytics — Relatório Corporativo", align="C", ln=1)
+        self.safe_cell(0, 8, "Elder Brain Analytics Relatório Corporativo", align="C", ln=1)
         self.set_text_color(0, 0, 0)
 
     def footer(self) -> None:
