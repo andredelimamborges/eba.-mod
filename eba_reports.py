@@ -514,12 +514,22 @@ def _centered_image(
     if required > remaining:
         pdf.add_page()
 
+# =========================
+# CAPA — LOGO EBA
+# =========================
+import os
+
+logo_path = "assets/logo_eba.png"
+if os.path.exists(logo_path):
     try:
-        pdf.ln(top_padding_mm)
-        pdf.image(image_path, x=x_mm, w=w_mm, h=h_mm_est)
-        pdf.ln(space_after)
+        page_width = pdf.w
+        logo_width = 40
+        x_position = (page_width - logo_width) / 2
+
+        pdf.image(logo_path, x=x_position, y=15, w=logo_width)
+        pdf.ln(35)  # espaço abaixo da logo
     except Exception:
-        pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
+        pass
 
 
 # =========================
@@ -618,7 +628,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
 
-        # ✅ empresa: vem do app (injeta em bfa_data["empresa"]) ou de outras integrações
+        
         empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
 
         # 1
@@ -837,7 +847,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         buf = io.BytesIO(out_bytes)
         buf.seek(0)
 
-        # ✅ correção mínima: evita NameError caso save_path não exista no escopo
+        
         try:
             _save_path = save_path
         except NameError:
