@@ -458,9 +458,11 @@ class PDFReport(FPDF):
         logo_path = "assets/logo_eba.png"
         if os.path.exists(logo_path):
             try:
-                logo_w = 40
+                logo_w = 60
                 x = (self.w - logo_w) / 2
-                self.image(logo_path, x=x, y=15, w=logo_w)
+                y = self.get_y() + 6
+                self.image(logo_path, x=x, y=y, w=logo_w)
+                self.set_y(y + 22)     # garante que o rodapé não suba
             except Exception:
                 pass
 
@@ -475,7 +477,6 @@ class PDFReport(FPDF):
         self.set_font(self._family, "", 10)
         meta = f"{APP_NAME} — {APP_VERSION}\n{datetime.now():%d/%m/%Y %H:%M}"
         self.set_text_color(107, 114, 128)
-        self.safe_multi_cell(0, 5, meta, align="C")
         self.set_text_color(0, 0, 0)
         self.set_y(self.h - 42)
         self.set_draw_color(209, 213, 219)
@@ -485,6 +486,7 @@ class PDFReport(FPDF):
         self.set_text_color(107, 114, 128)
         self.safe_multi_cell(0, 4.6, APP_TAGLINE, align="C")
         self.set_text_color(0, 0, 0)
+        self.safe_multi_cell(0, 5, meta, align="C")
 
 
 # =========================
