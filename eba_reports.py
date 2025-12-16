@@ -837,14 +837,21 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         buf = io.BytesIO(out_bytes)
         buf.seek(0)
 
-        if save_path:
+        # ✅ correção mínima: evita NameError caso save_path não exista no escopo
+        try:
+            _save_path = save_path
+        except NameError:
+            _save_path = None
+
+        if _save_path:
             try:
-                with open(save_path, "wb") as f:
+                with open(_save_path, "wb") as f:
                     f.write(buf.getbuffer())
             except Exception as e:
                 st.error(f"Erro ao salvar PDF: {e}")
 
         return buf
+
 
     except Exception as e:
         st.error(f"Erro crítico na geração do PDF: {e}")
