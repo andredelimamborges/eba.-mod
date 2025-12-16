@@ -118,6 +118,7 @@ if submitted:
 
     with st.spinner("Gerando relatório PDF..."):
         pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
+        
 if not empresa:
     empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
     empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
