@@ -476,7 +476,7 @@ class PDFReport(FPDF):
                 pass
 
         # texto da capa (preto, sem duplicação)
-        self.set_y(42)
+        self.set_y(24)
         self.set_font(self._family, "B", 26)
         self.set_text_color(0, 0, 0)
         self.multi_cell(0, 12, "Relatório Corporativo", align="C")
