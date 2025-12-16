@@ -460,7 +460,7 @@ class PDFReport(FPDF):
             try:
                 logo_w = 60
                 x = (self.w - logo_w) / 2
-                y = self.get_y() + 6
+                y = 120
                 self.image(logo_path, x=x, y=y, w=logo_w)
                 self.set_y(y + 22)     # garante que o rodapé não suba
             except Exception:
