@@ -411,7 +411,7 @@ class PDFReport(FPDF):
             return
         self.set_font(self._family, "B", 10)
         self.set_text_color(107, 114, 128)
-        self.safe_cell(0, 8, "Elder Brain Analytics Relatório Corporativo", align="C", ln=1)
+        self.safe_cell(0, 8, "Elder Brain Analytics -Relatório Corporativo", align="C", ln=1)
         self.set_text_color(0, 0, 0)
 
     def footer(self) -> None:
@@ -546,7 +546,7 @@ def _centered_image(
     except Exception:
         pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
 # =========================
-# CAPA — LOGO EBA
+# CAPA  LOGO EBA
 # =========================
 
 # =========================
@@ -610,7 +610,7 @@ def _summarize_fit(score: float) -> str:
         faixa = "moderada"
     else:
         faixa = "baixa"
-    return f"Resumo do gráfico (Fit): {s:.0f}% — compatibilidade {faixa} considerando traços e aderência ao perfil do cargo."
+    return f"Resumo do gráfico (Fit): {s:.0f}% - ompatibilidade {faixa} considerando traços e aderência ao perfil do cargo."
 
 
 # =========================
@@ -640,7 +640,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                 pass
 
         # CAPA
-        pdf.cover("Relatório Corporativo", f"Elder Brain Analytics — {cargo}")
+        pdf.cover("Relatório Corporativo", f"Elder Brain Analytics -{cargo}")
 
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
