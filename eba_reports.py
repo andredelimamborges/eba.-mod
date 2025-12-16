@@ -590,15 +590,25 @@ def _summarize_fit(score: float) -> str:
 # PDF PRINCIPAL
 # =========================
 def gerar_pdf_corporativo(
-    bfa_data: Dict[str, Any],
-    analysis: Dict[str, Any],
-    cargo: str,
-    save_path: Optional[str] = None,
-    logo_path: Optional[str] = None,  # mantido por compatibilidade
-) -> io.BytesIO:
-    """
-    Gera o PDF corporativo premium.
-    """
+    bfa_data: dict,
+    out_path: str,
+    cargo_input: str = "",
+    empresa_override: str = "",
+    usar_grafico_colorido: bool = True,
+    incluir_competencias: bool = True,
+    incluir_fatores: bool = True,
+    incluir_observacoes: bool = True,
+):
+    candidato = (bfa_data or {}).get("candidato", {}) or {}
+
+    empresa_pdf = (
+        empresa_override
+        or (bfa_data or {}).get("empresa")
+        or candidato.get("empresa")
+        or (bfa_data or {}).get("company")
+        or ""
+    )
+ 
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
         if _register_montserrat(pdf):

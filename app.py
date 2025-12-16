@@ -22,6 +22,18 @@ from eba_utils import (
 )
 from eba_llm import run_extracao, run_analise
 
+with st.spinner("Extraindo dados do relatório..."):
+    bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
+
+    if empresa:
+        # top-level (é o que teu PDF atual lê)
+        bfa_data["empresa"] = empresa
+
+        # também dentro do candidato (compat com prompt/LLM e outros módulos)
+        if "candidato" not in bfa_data or not isinstance(bfa_data["candidato"], dict):
+            bfa_data["candidato"] = {}
+        bfa_data["candidato"]["empresa"] = empresa
+
 
 def interpretar_big_five(nome, valor):
     v = float(valor)
@@ -60,14 +72,17 @@ st.caption("Avaliação comportamental avançada para tomada de decisão em RH")
 
 
 with st.form("eba_form"):
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         email_analista = st.text_input("E-mail do Analista", placeholder="analista@empresa.com")
     with col2:
         cargo_input = st.text_input("Cargo Avaliado", placeholder="Ex: Engenheiro de Software Pleno")
+    with col3:
+        empresa_input = st.text_input("Empresa", placeholder="Ex: MS Solutions")
 
     uploaded_file = st.file_uploader("Upload do relatório BFA (PDF ou TXT)", type=["pdf", "txt"])
     submitted = st.form_submit_button("Processar Relatório")
+
 
 
 if submitted:
@@ -81,9 +96,12 @@ if submitted:
         st.stop()
 
     empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
+    empresa = limpar_nome_empresa(empresa_input) if empresa_input else ""
+
+if not empresa:
+    empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
     empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
 
-    tracker = UsageTracker(provider="groq", email=email_analista or "", empresa=empresa, cargo=cargo_input)
 
     with st.spinner("Extraindo dados do relatório..."):
         bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
