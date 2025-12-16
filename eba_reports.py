@@ -450,18 +450,42 @@ class PDFReport(FPDF):
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
 
+    # =========================
     # FUNDO DA CAPA (IMAGEM FULL PAGE)
-        bg_path = os.path.join(os.path.dirname(__file__), "assets", "capa_bg.png")
+    # =========================
+        bg_path = os.path.join(os.path.dirname(__file__), "assets", "logo_eba.png")
         if os.path.exists(bg_path):
             try:
+                # cobre a página inteira
                 self.image(bg_path, x=0, y=0, w=self.w, h=self.h)
             except Exception:
                 pass
-
-    # (opcional) mantenha a faixa roxa — ou comente se quiser só o fundo
+    # ⬇️ A PARTIR DAQUI, TODO O CONTEÚDO FICA POR CIMA DO FUNDO
         self.set_fill_color(44, 16, 156)
         self.rect(0, 0, self.w, 26, "F")
-        
+
+        self.set_y(38)
+        self.set_font(self._family, "B", 22)
+        self.safe_multi_cell(0, 10, titulo, align="C")
+        self.ln(1)
+        self.set_font(self._family, "", 12)
+        self.safe_multi_cell(0, 6, subtitulo, align="C")
+        self.ln(4)
+
+        self.set_font(self._family, "", 10)
+        meta = f"{APP_NAME} — {APP_VERSION}\n{datetime.now():%d/%m/%Y %H:%M}"
+        self.set_text_color(107, 114, 128)
+        self.safe_multi_cell(0, 5, meta, align="C")
+        self.set_text_color(0, 0, 0)
+
+        self.set_y(self.h - 42)
+        self.set_draw_color(209, 213, 219)
+        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+        self.ln(4)
+        self.set_font(self._family, "I", 9)
+        self.set_text_color(107, 114, 128)
+        self.safe_multi_cell(0, 4.6, APP_TAGLINE, align="C")
+        self.set_text_color(0, 0, 0)  
     # =========================
     # LOGO NA CAPA (SEM ALTERAR DESIGN)
     # =========================
