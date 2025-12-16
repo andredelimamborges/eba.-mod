@@ -120,6 +120,7 @@ if submitted:
 
     # 3) empresa: input tem prioridade; se vazio, tenta extrair do texto
     empresa = limpar_nome_empresa(empresa_input) if empresa_input else ""
+
     if not empresa:
         empresa_match = re.search(
             r"(empresa|organização|companhia)\s*[:\-]\s*(.+)",
@@ -127,6 +128,10 @@ if submitted:
             re.I,
         )
         empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
+
+    if not empresa:
+        st.error("empresa é obrigatória. informe no formulário ou no relatório.")
+        st.stop()
 
     # 4) tracker
     tracker = UsageTracker(
