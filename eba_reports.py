@@ -449,9 +449,19 @@ class PDFReport(FPDF):
 
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
+
+    # FUNDO DA CAPA (IMAGEM FULL PAGE)
+        bg_path = os.path.join(os.path.dirname(__file__), "assets", "capa_bg.png")
+        if os.path.exists(bg_path):
+            try:
+                self.image(bg_path, x=0, y=0, w=self.w, h=self.h)
+            except Exception:
+                pass
+
+    # (opcional) mantenha a faixa roxa — ou comente se quiser só o fundo
         self.set_fill_color(44, 16, 156)
         self.rect(0, 0, self.w, 26, "F")
-
+        
     # =========================
     # LOGO NA CAPA (SEM ALTERAR DESIGN)
     # =========================
