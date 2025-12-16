@@ -450,16 +450,14 @@ class PDFReport(FPDF):
     def cover(self, titulo: str, subtitulo: str) -> None:
         self.add_page()
 
-    # =========================
     # FUNDO DA CAPA (FULL PAGE - COVER REAL)
-    # =========================
         bg_path = os.path.join(os.path.dirname(__file__), "assets", "logo_eba.png")
         if os.path.exists(bg_path):
             try:
                 from PIL import Image
-
                 with Image.open(bg_path) as im:
                     px_w, px_h = im.size
+
                 page_w, page_h = self.w, self.h
                 img_ratio = px_w / px_h
                 page_ratio = page_w / page_h
@@ -473,31 +471,26 @@ class PDFReport(FPDF):
 
                 x = (page_w - w) / 2
                 y = (page_h - h) / 2
-
                 self.image(bg_path, x=x, y=y, w=w, h=h)
             except Exception:
                 pass
-
-    # =========================
-    # TÍTULO / SUBTÍTULO (ALTO CONTRASTE)
-    # =========================
+    # título / subtítulo (alto contraste)
     self.set_y(38)
 
-    # sombra
+    # sombra do título
     self.set_font(self._family, "B", 22)
     self.set_text_color(0, 0, 0)
     self.set_x(self.l_margin + 0.6)
     self.safe_multi_cell(0, 10, titulo, align="C")
 
-    # texto
+    # título branco
     self.set_text_color(255, 255, 255)
     self.set_x(self.l_margin)
     self.set_y(38)
     self.safe_multi_cell(0, 10, titulo, align="C")
-
     self.ln(1)
 
-    # subtítulo
+    # subtítulo (sombra + branco)
     self.set_font(self._family, "", 12)
     self.set_text_color(0, 0, 0)
     self.set_x(self.l_margin + 0.6)
@@ -506,12 +499,9 @@ class PDFReport(FPDF):
     self.set_text_color(255, 255, 255)
     self.set_x(self.l_margin)
     self.safe_multi_cell(0, 6, subtitulo, align="C")
-
     self.ln(4)
 
-    # =========================
-    # META (VERSÃO / DATA)
-    # =========================
+    # meta (versão/data)
     self.set_font(self._family, "", 10)
     meta = f"{APP_NAME} — {APP_VERSION}\n{datetime.now():%d/%m/%Y %H:%M}"
 
@@ -523,9 +513,7 @@ class PDFReport(FPDF):
     self.set_x(self.l_margin)
     self.safe_multi_cell(0, 5, meta, align="C")
 
-    # =========================
-    # RODAPÉ
-    # =========================
+    # rodapé
     self.set_y(self.h - 42)
     self.set_draw_color(209, 213, 219)
     self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
