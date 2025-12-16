@@ -84,20 +84,40 @@ with st.form("eba_form"):
     submitted = st.form_submit_button("Processar Relatório")
 
 
-
 if submitted:
     if not uploaded_file or not cargo_input.strip():
         st.error("Informe o cargo e envie o relatório.")
         st.stop()
 
+    # 1) extrai texto
     texto = extract_text_from_pdf(uploaded_file)
     if not texto.strip():
         st.error("Não foi possível extrair texto do relatório.")
         st.stop()
 
-    empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
+    # 2) empresa: prioridade pro input do rh; se vazio, tenta extrair do texto
     empresa = limpar_nome_empresa(empresa_input) if empresa_input else ""
+    if not empresa:
+        empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
+        empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
 
+    tracker = UsageTracker(provider="groq", email=email_analista or "", empresa=empresa, cargo=cargo_input)
+
+    with st.spinner("Extraindo dados do relatório..."):
+        bfa_data = run_extracao(text=texto, cargo=cargo_input, tracker=tracker)
+
+        # garante empresa no payload (top-level e candidato)
+        if empresa:
+            bfa_data["empresa"] = empresa
+            if "candidato" not in bfa_data or not isinstance(bfa_data["candidato"], dict):
+                bfa_data["candidato"] = {}
+            bfa_data["candidato"]["empresa"] = empresa
+
+    with st.spinner("Analisando perfil comportamental..."):
+        analysis = run_analise(bfa_data=bfa_data, cargo=cargo_input, tracker=tracker)
+
+    with st.spinner("Gerando relatório PDF..."):
+        pdf_buf = gerar_pdf_corporativo(bfa_data, analysis, cargo_input)
 if not empresa:
     empresa_match = re.search(r"(empresa|organização|companhia)\s*[:\-]\s*(.+)", texto, re.I)
     empresa = limpar_nome_empresa(empresa_match.group(2)) if empresa_match else ""
