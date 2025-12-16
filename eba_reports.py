@@ -452,6 +452,18 @@ class PDFReport(FPDF):
         self.set_fill_color(44, 16, 156)
         self.rect(0, 0, self.w, 26, "F")
 
+    # =========================
+    # LOGO NA CAPA (SEM ALTERAR DESIGN)
+    # =========================
+        logo_path = "assets/logo_eba.png"
+        if os.path.exists(logo_path):
+            try:
+                logo_w = 40
+                x = (self.w - logo_w) / 2
+                self.image(logo_path, x=x, y=15, w=logo_w)
+            except Exception:
+                pass
+
         self.set_y(38)
         self.set_font(self._family, "B", 22)
         self.safe_multi_cell(0, 10, titulo, align="C")
@@ -465,7 +477,6 @@ class PDFReport(FPDF):
         self.set_text_color(107, 114, 128)
         self.safe_multi_cell(0, 5, meta, align="C")
         self.set_text_color(0, 0, 0)
-
         self.set_y(self.h - 42)
         self.set_draw_color(209, 213, 219)
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
@@ -517,20 +528,6 @@ def _centered_image(
 # =========================
 # CAPA — LOGO EBA
 # =========================
-import os
-
-logo_path = "assets/eba.png"
-if os.path.exists(logo_path):
-    try:
-        page_width = pdf.w
-        logo_width = 40
-        x_position = (page_width - logo_width) / 2
-
-        pdf.image(logo_path, x=x_position, y=15, w=logo_width)
-        pdf.ln(35)  # espaço abaixo da logo
-    except Exception:
-        pass
-
 
 # =========================
 # RESUMOS (SEM LLM)
