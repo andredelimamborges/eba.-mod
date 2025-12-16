@@ -589,16 +589,8 @@ def _summarize_fit(score: float) -> str:
 # =========================
 # PDF PRINCIPAL
 # =========================
-def gerar_pdf_corporativo(
-    bfa_data: dict,
-    out_path: str,
-    cargo_input: str = "",
-    empresa_override: str = "",
-    usar_grafico_colorido: bool = True,
-    incluir_competencias: bool = True,
-    incluir_fatores: bool = True,
-    incluir_observacoes: bool = True,
-):
+def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str = "", **kwargs):
+    cargo = cargo_input or ""
     candidato = (bfa_data or {}).get("candidato", {}) or {}
 
     empresa_pdf = (
