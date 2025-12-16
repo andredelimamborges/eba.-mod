@@ -527,6 +527,13 @@ def _centered_image(
     if required > remaining:
         pdf.add_page()
 
+    # ✅ INSERE A IMAGEM (isso aqui tinha sumido)
+    try:
+        pdf.ln(top_padding_mm)
+        pdf.image(image_path, x=x_mm, w=w_mm, h=h_mm_est)
+        pdf.ln(space_after)
+    except Exception:
+        pdf.paragraph("Falha ao inserir imagem do gráfico.", size=9, gap=2.0)
 # =========================
 # CAPA — LOGO EBA
 # =========================
