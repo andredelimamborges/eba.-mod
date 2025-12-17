@@ -448,7 +448,7 @@ class PDFReport(FPDF):
         self.ln(space)
 
     def heading(self, text: str, size: int = 14):
-        # incrementa seção
+    # incrementa seção
         self._section_counter += 1
         self._subsection_counter = 0
 
@@ -457,17 +457,16 @@ class PDFReport(FPDF):
 
         # estilos
         if self._heading_style == "executive":
-            bg = (220, 230, 245)      # cinza claro
-            fg = (255, 255, 255)         # cinza escuro
-            icon = ""
+            bg = (235, 237, 240)      # cinza claro
+            fg = (55, 65, 81)         # cinza escuro
         else:
-            bg = (220, 230, 245)      # cinza claro
-            fg = (255, 255, 255)      # cor da marca
-            icon = ""
+            bg = (232, 238, 249)      # azul claro
+            fg = (44, 16, 156)        # cor da marca
+
         # reset seguro
         self.set_x(self.l_margin)
 
-        # desenha faixa
+        # faixa
         self.set_fill_color(*bg)
         self.set_text_color(*fg)
         self.set_font(self._family, "B", size)
@@ -475,12 +474,11 @@ class PDFReport(FPDF):
         self.cell(
             0,
             9,
-            self._safe(f"{icon} {label}"),
+            label,
             new_x="LMARGIN",
             new_y="NEXT",
             fill=True
         )
-
 
         self.ln(3)
         self.set_text_color(0, 0, 0)
