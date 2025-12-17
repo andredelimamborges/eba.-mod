@@ -338,8 +338,8 @@ ESTRUTURA OBRIGATÓRIA:
   "potencial_lideranca": "BAIXO" | "MÉDIO" | "ALTO" ou null,
   "integridade_fgi": número 0-100 ou null,
   "resumo_qualitativo": "texto do resumo presente no relatório",
-  "pontos_fortes": ["lista de 3-5 pontos"],
-  "pontos_atencao": ["lista de 2-4 pontos"],
+  "pontos_fortes": ["string"],
+  "pontos_atencao": ["string"],
   "fit_geral_cargo": número 0-100
 }
 
@@ -349,16 +349,17 @@ REGRAS DE EXTRAÇÃO:
 3. extraia todas as competências ms que aparecerem
 4. use null quando não houver informação confiável
 5. resumo_qualitativo deve ser o texto original do relatório
-6. pontos_fortes: melhores características (notas altas)
-7. pontos_atencao: áreas de desenvolvimento (notas baixas)
-8. fit_geral_cargo: calcule compatibilidade 0-100 baseado no cargo: {cargo}
+6. pontos_fortes: retorne APENAS os 2 ou 3 pontos mais relevantes para o cargo, em frases curtas
+7. pontos_atencao: retorne APENAS os 1 ou 2 pontos mais críticos para o cargo, em frases curtas
+8. evite descrições genéricas; priorize impacto no cargo
+9. fit_geral_cargo: calcule compatibilidade 0-100 baseado no cargo: {cargo}
 
 RELATÓRIO:
 \"\"\"
 {text}
 \"\"\"
 
-CONTEXTO ADICIONAL (materiais de treinamento):
+CONTEXTO ADICIONAL:
 \"\"\"
 {training_context}
 \"\"\"
@@ -376,7 +377,7 @@ DADOS DO CANDIDATO:
 PERFIL IDEAL DO CARGO:
 {perfil_cargo}
 
-Retorne como JSON estruturado seguindo este formato:
+Retorne APENAS um JSON válido seguindo este formato:
 
 {
   "compatibilidade_geral": número 0-100,
@@ -390,29 +391,40 @@ Retorne como JSON estruturado seguindo este formato:
     "Neuroticismo": "análise específica"
   },
   "competencias_criticas": [
-    {"competencia": "nome", "avaliacao": "texto", "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"}
+    {
+      "competencia": "nome",
+      "avaliacao": "texto",
+      "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"
+    }
   ],
   "saude_emocional_contexto": "parágrafo",
   "recomendacoes_desenvolvimento": [
-  {
-    "titulo": "string",
-    "descricao": "explicação objetiva conectada ao perfil",
-    "impacto_esperado": "impacto no desempenho do cargo"
-  }
-],
-"cargos_alternativos": [
-  {
-    "cargo": "nome",
-    "aderencia_estimada": "ALTA | MÉDIA | BAIXA",
-    "justificativa": "por que este cargo se encaixa melhor no perfil"
-  }
-]
+    {
+      "titulo": "string",
+      "descricao": "explicação objetiva conectada ao perfil",
+      "impacto_esperado": "impacto direto no desempenho do cargo"
+    }
+  ],
+  "cargos_alternativos": [
+    {
+      "cargo": "nome",
+      "aderencia_estimada": "ALTA | MÉDIA | BAIXA",
+      "justificativa": "por que este cargo se encaixa melhor no perfil"
+    }
+  ]
+}
 
-
+REGRAS IMPORTANTES:
+- priorize impacto no cargo avaliado
+- limite a 2–3 recomendações de desenvolvimento
+- limite a 1–3 cargos alternativos
+- evite descrições longas ou genéricas
+- cada item deve caber em UMA frase curta
+- não repita informações já citadas em outras seções
+- seja objetivo, profissional e orientado à decisão
 
 responda estritamente em json. sem texto fora do json. sem markdown.
 """
-
 
 # =============================================================================
 # core LLM call
