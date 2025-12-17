@@ -977,7 +977,20 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                 continue
 
             nome = str(c.get("cargo", "")).strip()
-            aderencia = str(c.get("aderencia_estimada", "")).strip().upper()
+            aderencia_raw = str(c.get("aderencia_estimada", "")).strip().lower()
+
+            mapa = {
+                "alta": "ALTA",
+                "média": "MÉDIA",
+                "media": "MÉDIA",
+                "baixa": "BAIXA",
+                "high": "ALTA",
+                "medium": "MÉDIA",
+                "low": "BAIXA",
+            }
+
+            aderencia = mapa.get(aderencia_raw, "")
+
             justificativa = str(c.get("justificativa", "")).strip()
 
             if not nome:
@@ -997,10 +1010,10 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             )
 
         # aplica limites
-        cargos_alt_clean = cargos_alt_clean[:5]
+        cargos_alt_clean = cargos_alt_clean[:]
 
         # fallback se vier pouco
-        if len(cargos_alt_clean) < 3:
+        if not cargos_alt_clean:
             fallback = [
                 {
                     "cargo": f"{cargo}",
