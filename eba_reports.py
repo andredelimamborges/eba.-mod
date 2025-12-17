@@ -367,7 +367,7 @@ class PDFReport(FPDF):
         self._heading_style = style
 
     def _safe(self, s: Optional[str]) -> str:
-        s = s or ""
+        s = "" if s is None else str(s)
 
         rep = {
             "\u2014": "-",
@@ -901,30 +901,41 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             pdf.divider(1.5)
 
         # 9
-        pdf.heading("Recomendações de Desenvolvimento")
-
+        pdf.heading("9. Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
 
         if recs:
-            for rec in recs:
-                pdf.set_font(pdf._family, "B", 10)
-                pdf.safe_multi_cell(0, 6, rec.get("titulo", ""))
-                pdf.set_font(pdf._family, "", 9)
-                pdf.safe_multi_cell(0, 5, rec.get("descricao", ""))
-                pdf.set_text_color(107, 114, 128)
-                pdf.safe_multi_cell(
-                    0,
-                    5,
-                    f"Impacto esperado: {rec.get('impacto_esperado', '')}"
-                )
-                pdf.set_text_color(0, 0, 0)
-                pdf.ln(2)
+            for i, rec in enumerate(recs, 1):
+                # caso novo: rec é objeto {titulo, descricao, impacto_esperado}
+                if isinstance(rec, dict):
+                    titulo = rec.get("titulo") or f"Recomendação {i}"
+                    descricao = rec.get("descricao") or ""
+                    impacto = rec.get("impacto_esperado") or ""
+
+                    pdf.set_font(pdf._family, "B", 10)
+                    pdf.safe_cell(10, 6, f"{i}.")
+                    pdf.safe_multi_cell(0, 6, titulo)
+
+                    if descricao:
+                        pdf.set_font(pdf._family, "", 9)
+                        pdf.safe_multi_cell(0, 5, descricao)
+
+                    if impacto:
+                        pdf.set_text_color(107, 114, 128)
+                        pdf.safe_multi_cell(0, 5, f"Impacto esperado: {impacto}")
+                        pdf.set_text_color(0, 0, 0)
+
+                    pdf.ln(2)
+
+                # caso antigo: rec é string
+                else:
+                    pdf.set_font(pdf._family, "B", 10)
+                    pdf.safe_cell(10, 6, f"{i}.")
+                    pdf.set_font(pdf._family, "", 10)
+                    pdf.safe_multi_cell(0, 6, str(rec))
+                    pdf.ln(1)
         else:
-            pdf.paragraph(
-                "Não foram identificadas recomendações de desenvolvimento estruturadas com base nos dados disponíveis.",
-                size=10,
-                gap=1.0,
-            )
+            pdf.paragraph("Não foram encontradas recomendações estruturadas.", size=10, gap=1.0)
 
         # 10
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
