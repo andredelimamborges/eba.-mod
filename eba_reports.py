@@ -669,9 +669,9 @@ def _summarize_competencias(competencias: List[Dict[str, Any]]) -> str:
 
     return (
         "Resumo do gráfico (Competências):\n"
-        f"- destaques (maiores notas): {top_s}\n"
-        f"- pontos de atenção (menores notas): {low_s}\n"
-        "- referência visual: <45 (baixo), 45–54 (moderado), ≥55 (bom)."
+        f"- Destaques (maiores notas): {top_s}\n"
+        f"- Pontos de Atenção (menores notas): {low_s}\n"
+        "- Referência visual: <45 (baixo), 45–54 (moderado), ≥55 (bom)."
     )
 
 
@@ -903,39 +903,13 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             pdf.divider(1.5)
 
         # 8
-        pdf.heading("Pontos de Atenção")
-
-        # (mantém como estava: pontos de atenção vêm da análise, conforme teu fluxo atual)
-        pontos_atencao = (analysis or {}).get("pontos_atencao", []) or []
-        pontos_atencao = [
-            str(p).strip()
-            for p in pontos_atencao
-            if p and isinstance(p, (str, int, float))
-        ][:2]
-
-        if pontos_atencao:
-            bullet = "- "
-            indent = 6  # mm
-            line_h = 5
-
-            for p in pontos_atencao:
-                x = pdf.get_x()
-
-                # bullet
-                pdf.safe_cell(indent, line_h, bullet, ln=0)
-
-                # texto alinhado (multi-line com recuo)
-                pdf.set_x(x + indent)
-                pdf.safe_multi_cell(0, line_h, str(p))
-
-                pdf.ln(0.5)
-        else:
-            pdf.paragraph(
-                "Não foram identificados pontos de atenção críticos com base nos dados disponíveis.",
-                size=10,
-                gap=1.0,
-            )
-
+        pa = (bfa_data or {}).get("pontos_atencao", []) or []
+        if pa:
+            pdf.heading("Pontos de Atenção")
+            for item in pa:
+                if item:
+                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
+            pdf.divider(1.5)
         # 9
         pdf.heading("Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
