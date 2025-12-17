@@ -883,13 +883,26 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
 
         # 7
-        pf = (bfa_data or {}).get("pontos_fortes", []) or []
-        if pf:
-            pdf.heading("Pontos Fortes")
-            for item in pf:
-                if item:
-                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
-            pdf.divider(1.5)
+        pdf.heading("Pontos Fortes")
+
+        pontos_fortes = (analysis or {}).get("pontos_fortes", []) or []
+
+        # blindagem absoluta
+        pontos_fortes = [
+            str(p).strip()
+            for p in pontos_fortes
+            if p and isinstance(p, (str, int, float))
+        ][:3]
+
+        if pontos_fortes:
+            for p in pontos_fortes:
+                pdf.safe_multi_cell(0, 5, f"- {p}")
+        else:
+            pdf.paragraph(
+                "Não foram identificados pontos fortes críticos com base nos dados disponíveis.",
+                size=10,
+                gap=1.0,
+            )
 
         # 8
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
@@ -901,7 +914,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             pdf.divider(1.5)
 
         # 9
-        pdf.heading("9. Recomendações de Desenvolvimento")
+        pdf.heading("Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
 
         if recs:

@@ -345,7 +345,7 @@ ESTRUTURA OBRIGATÓRIA:
 }
 
 REGRAS DE EXTRAÇÃO:
-1. normalize percentis/notas para escalas apropriadas
+1. normalize apenas o Big Five (traits_bfa) para a escala 0–10; demais métricas permanecem em suas escalas do relatório
 2. big five: percentil 60 -> ~6.0/10
 3. extraia todas as competências ms que aparecerem
 4. use null quando não houver informação confiável
@@ -354,6 +354,11 @@ REGRAS DE EXTRAÇÃO:
 7. pontos_atencao: retorne APENAS os 1 ou 2 pontos mais críticos para o cargo, em frases curtas
 8. evite descrições genéricas; priorize impacto no cargo
 9. fit_geral_cargo: calcule compatibilidade 0-100 baseado no cargo: {cargo}
+10. pontos_fortes: máximo 3 itens (não exceder)
+11. pontos_atencao: máximo 2 itens (não exceder)
+12. não repita ideias semelhantes; consolide sinônimos em um único ponto
+13. cada ponto deve ter no máximo 12–16 palavras (frase curta)
+14. normalize para 0–10 APENAS traits_bfa; mantenha competencias_ms.nota em 0–100
 
 
 RELATÓRIO:
