@@ -145,35 +145,91 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         return None
 
     df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
-    df = df.sort_values("nota", ascending=True).tail(15)
 
+    # ✅ fallback de escala (0–1 ou 0–10 -> 0–100)
+    mx = float(df["nota"].max() or 0)
+    if 0 < mx <= 1.05:
+        df["nota"] = df["nota"] * 100
+    elif 0 < mx <= 10.5:
+        df["nota"] = df["nota"] * 10
+
+    # ✅ lista fixa (ordem "como era antes")
+    target_order = [
+        "Extroversão e Expansividade",
+        "Inovação",
+        "Resiliência e Emoção",
+        "Produtividade e Dinamismo",
+        "Autogestão e Desempenho",
+        "Simpatia",
+    ]
+
+    # normalizador para bater mesmo com variações (acentos / espaços)
+    import unicodedata, re
+
+    def _norm(s: str) -> str:
+        s = (s or "").strip().lower()
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        s = re.sub(r"\s+", " ", s)
+        return s
+
+    alias_map = {
+        _norm("Extroversão e Expansividade"): "Extroversão e Expansividade",
+        _norm("Inovação"): "Inovação",
+        _norm("Resiliência e Emoção"): "Resiliência e Emoção",
+        _norm("Resiliencia e Emocao"): "Resiliência e Emoção",          # sem acento
+        _norm("Resiliência e Emocação"): "Resiliência e Emoção",        # variação comum
+        _norm("Produtividade e Dinamismo"): "Produtividade e Dinamismo",
+        _norm("Autogestão e Desempenho"): "Autogestão e Desempenho",
+        _norm("Augestão e Desempenho"): "Autogestão e Desempenho",      # typo do usuário
+        _norm("Simpatia"): "Simpatia",
+    }
+
+    df["_key"] = df["nome"].astype(str).map(_norm)
+    df["nome"] = df["_key"].map(alias_map).fillna(df["nome"].astype(str))
+
+    df_sel = df[df["nome"].isin(target_order)].copy()
+
+    # se achou pelo menos 1 das 6, força o gráfico só com elas
+    if not df_sel.empty:
+        df_sel["nome"] = pd.Categorical(df_sel["nome"], categories=target_order, ordered=True)
+        df_sel = df_sel.sort_values("nome", ascending=True)
+        df = df_sel
+    else:
+        # fallback original (top 15)
+        df = df.sort_values("nota", ascending=True).tail(15)
+
+    # ===== daqui pra baixo, mantém seu plotly igual =====
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
         for n in df["nota"].tolist()
     ]
 
-    fig = go.Figure(
+    fig = go.Figure()
+    fig.add_trace(
         go.Bar(
             x=df["nota"],
             y=df["nome"],
             orientation="h",
             marker=dict(color=cores),
-            text=df["nota"].round(0).astype(int),
+            text=[f"{int(round(v))}" for v in df["nota"].tolist()],
             textposition="outside",
         )
     )
+
     fig.update_layout(
-        title="Competências MS (Top 15)",
+        title="Competências MS",
         xaxis_title="Nota",
         yaxis_title="",
-        height=620,
-        showlegend=False,
-        margin=dict(l=160, r=40, t=70, b=30),
+        margin=dict(l=120, r=30, t=60, b=40),
+        height=420,
     )
+
+    # linhas de referência (mantém o padrão)
     fig.add_vline(x=45, line_dash="dash", line_color=COLOR_WARN)
     fig.add_vline(x=55, line_dash="dash", line_color=COLOR_GOOD)
-    return fig
 
+    return fig
 
 def criar_gauge_fit(fit_score: float) -> go.Figure:
     score = float(fit_score or 0)
