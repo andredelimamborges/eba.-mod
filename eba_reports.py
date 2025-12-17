@@ -145,35 +145,88 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
         return None
 
     df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
-    df = df.sort_values("nota", ascending=True).tail(15)
+    df["nome"] = df["nome"].astype(str)
+
+    # normalização simples (sem depender de libs)
+    def _norm(s: str) -> str:
+        s = s.lower().strip()
+        s = re.sub(r"\s+", " ", s)
+        # remove acentos básico
+        s = (
+            s.replace("á", "a").replace("à", "a").replace("â", "a").replace("ã", "a")
+             .replace("é", "e").replace("ê", "e")
+             .replace("í", "i")
+             .replace("ó", "o").replace("ô", "o").replace("õ", "o")
+             .replace("ú", "u")
+             .replace("ç", "c")
+        )
+        return s
+
+    df["_nome_norm"] = df["nome"].map(_norm)
+
+    # ✅ SOMENTE ESTES 6 (na ordem exata)
+    alvo = [
+        ("Extroversão e Expansividade", ["extroversao e expansividade", "extroversao", "expansividade"]),
+        ("Inovação", ["inovacao", "inovacao e criatividade", "criatividade", "abertura e inovacao"]),
+        ("Resiliência e Emoção", ["resiliencia e emocao", "resiliencia", "emocao", "equilibrio emocional"]),
+        ("Produtividade e Dinamismo", ["produtividade e dinamismo", "produtividade", "dinamismo"]),
+        ("Autogestão e Desempenho", ["autogestao e desempenho", "autogestao", "desempenho", "performance"]),
+        ("Simpatia", ["simpatia", "cordialidade", "amabilidade", "gentileza"]),
+    ]
+
+    escolhidos = []
+    usados = set()
+
+    for rotulo, termos in alvo:
+        # acha a melhor linha que bate em qualquer termo (contains)
+        cand = df[df["_nome_norm"].apply(lambda x: any(t in x for t in termos))].copy()
+        if cand.empty:
+            continue
+
+        # evita duplicar a mesma competência caso bata em mais de um alvo
+        cand = cand[~cand["_nome_norm"].isin(usados)]
+        if cand.empty:
+            continue
+
+        # se houver múltiplas, pega a de maior nota (mais representativa)
+        row = cand.sort_values("nota", ascending=False).iloc[0]
+        usados.add(row["_nome_norm"])
+        escolhidos.append({"nome": rotulo, "nota": float(row["nota"])})
+
+    if not escolhidos:
+        return None
+
+    out = pd.DataFrame(escolhidos)
+    out = out.sort_values("nota", ascending=True)
 
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
-        for n in df["nota"].tolist()
+        for n in out["nota"].tolist()
     ]
 
     fig = go.Figure(
         go.Bar(
-            x=df["nota"],
-            y=df["nome"],
+            x=out["nota"],
+            y=out["nome"],
             orientation="h",
             marker=dict(color=cores),
-            text=df["nota"].round(0).astype(int),
+            text=out["nota"].round(0).astype(int),
             textposition="outside",
         )
     )
+
     fig.update_layout(
-        title="Competências MS (Top 15)",
+        title="Competências MS (Seleção Fixa)",
         xaxis_title="Nota",
         yaxis_title="",
-        height=620,
+        height=460,
         showlegend=False,
-        margin=dict(l=160, r=40, t=70, b=30),
+        margin=dict(l=220, r=40, t=70, b=30),
     )
     fig.add_vline(x=45, line_dash="dash", line_color=COLOR_WARN)
     fig.add_vline(x=55, line_dash="dash", line_color=COLOR_GOOD)
-    return fig
 
+    return fig
 
 def criar_gauge_fit(fit_score: float) -> go.Figure:
     score = float(fit_score or 0)
