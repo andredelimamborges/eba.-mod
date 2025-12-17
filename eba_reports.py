@@ -459,12 +459,11 @@ class PDFReport(FPDF):
         if self._heading_style == "executive":
             bg = (235, 237, 240)      # cinza claro
             fg = (55, 65, 81)         # cinza escuro
-            icon = "▸"
+            icon = ">"
         else:
             bg = (232, 238, 249)      # azul claro
             fg = (44, 16, 156)        # cor da marca
-            icon = "▸"
-
+            icon = ">"
         # reset seguro
         self.set_x(self.l_margin)
 
@@ -476,11 +475,12 @@ class PDFReport(FPDF):
         self.cell(
             0,
             9,
-            f"{icon} {label}",
+            self._safe(f"{icon} {label}"),
             new_x="LMARGIN",
             new_y="NEXT",
             fill=True
         )
+
 
         self.ln(3)
         self.set_text_color(0, 0, 0)
@@ -726,7 +726,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
 
         # 1
-        pdf.heading("1. Informações do Candidato")
+        pdf.heading("Informações do Candidato")
         empresa_line = f"Empresa: {empresa_pdf}\n" if empresa_pdf else ""
         pdf.paragraph(
             f"{empresa_line}"
@@ -739,7 +739,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
         
         # 2
-        pdf.heading("2. Decisão e Compatibilidade")
+        pdf.heading("Decisão e Compatibilidade")
         decisao = (analysis or {}).get("decisao", "N/A")
         compat = float((analysis or {}).get("compatibilidade_geral", 0) or 0)
 
@@ -766,7 +766,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
 
         # 3
-        pdf.heading("3. Resumo Executivo")
+        pdf.heading("Resumo Executivo")
         resumo = (analysis or {}).get("resumo_executivo", justificativa)
         if resumo:
             pdf.paragraph(resumo, size=10, gap=1.2)
@@ -800,7 +800,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
 
         # 5 - GRÁFICOS
-        pdf.heading("5. Visualizações (Gráficos)")
+        pdf.heading("Visualizações (Gráficos)")
         from eba_config import gerar_perfil_cargo_dinamico
         perfil = gerar_perfil_cargo_dinamico(cargo)
         traits_ideais = (perfil or {}).get("traits_ideais", {}) or None
@@ -864,7 +864,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
 
         # 6
-        pdf.heading("6. Saúde Emocional e Resiliência")
+        pdf.heading("Saúde Emocional e Resiliência")
         saude = (analysis or {}).get("saude_emocional_contexto", "")
         if saude:
             pdf.paragraph(saude, size=10, gap=1.0)
@@ -887,7 +887,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         # 7
         pf = (bfa_data or {}).get("pontos_fortes", []) or []
         if pf:
-            pdf.heading("7. Pontos Fortes")
+            pdf.heading("Pontos Fortes")
             for item in pf:
                 if item:
                     pdf.paragraph(f"- {item}", size=10, gap=0.6)
@@ -896,14 +896,14 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         # 8
         pa = (bfa_data or {}).get("pontos_atencao", []) or []
         if pa:
-            pdf.heading("8. Pontos de Atenção")
+            pdf.heading("Pontos de Atenção")
             for item in pa:
                 if item:
                     pdf.paragraph(f"- {item}", size=10, gap=0.6)
             pdf.divider(1.5)
 
         # 9
-        pdf.heading("9. Recomendações de Desenvolvimento")
+        pdf.heading("Recomendações de Desenvolvimento")
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
         if recs:
             for i, rec in enumerate(recs, 1):
@@ -920,7 +920,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
             pdf.divider(2.0)
-            pdf.heading("10. Cargos Alternativos Sugeridos")
+            pdf.heading("Cargos Alternativos Sugeridos")
             for c in cargos_alt:
                 nome_alt = c.get("cargo", "")
                 just = c.get("justificativa", "")
