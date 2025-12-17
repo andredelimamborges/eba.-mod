@@ -146,10 +146,6 @@ def criar_grafico_competencias(competencias: List[Dict[str, Any]]) -> Optional[g
 
     df["nota"] = pd.to_numeric(df["nota"], errors="coerce").fillna(0)
     df = df.sort_values("nota", ascending=True).tail(15)
-    # fallback: se vier 0-10 por engano, converte para 0-100
-    mx = float(df["nota"].max() or 0)
-    if 0 < mx <= 10.5:
-        df["nota"] = df["nota"] * 10
 
     cores = [
         COLOR_BAD if n < 45 else COLOR_WARN if n < 55 else COLOR_GOOD
