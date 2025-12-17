@@ -317,11 +317,12 @@ ESTRUTURA OBRIGATÓRIA:
   },
   "competencias_ms": [
     {
-      "nome": "string",
-      "nota": número,
-      "classificacao": "string"
+     "nome": "string",
+     "nota": número 0-100,
+     "classificacao": "string"
     }
   ],
+
   "facetas_relevantes": [
     {
       "nome": "string",
@@ -353,6 +354,7 @@ REGRAS DE EXTRAÇÃO:
 7. pontos_atencao: retorne APENAS os 1 ou 2 pontos mais críticos para o cargo, em frases curtas
 8. evite descrições genéricas; priorize impacto no cargo
 9. fit_geral_cargo: calcule compatibilidade 0-100 baseado no cargo: {cargo}
+
 
 RELATÓRIO:
 \"\"\"
@@ -416,13 +418,15 @@ Retorne APENAS um JSON válido seguindo este formato:
 
 REGRAS IMPORTANTES:
 - priorize impacto no cargo avaliado
-- limite a 2–3 recomendações de desenvolvimento
-- limite a 1–3 cargos alternativos
+- limite a 2-3 recomendações de desenvolvimento
+- limite a 1-3 cargos alternativos
 - evite descrições longas ou genéricas
 - cada item deve caber em UMA frase curta
 - não repita informações já citadas em outras seções
 - seja objetivo, profissional e orientado à decisão
-
+- NÃO normalize competencias_ms.nota para 0-10. mantenha 0-100 (ex.: 57 fica 57).
+- a normalização 0-10 é APENAS para traits_bfa.
+-Neuroticismo quanto menor melhor, regra simples e importante do BFA.
 responda estritamente em json. sem texto fora do json. sem markdown.
 """
 
