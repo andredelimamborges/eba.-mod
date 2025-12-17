@@ -255,11 +255,20 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     with tabs[4]:
         st.json(bfa_data)
 
-    if st.session_state.get("pdf_bytes"):
+
+    nome_avaliado = (
+    st.session_state.bfa_data
+    .get("candidato", {})
+    .get("nome", "avaliado")
+)
+
+    nome_limpo = re.sub(r"[^a-zA-Z0-9_-]+", "_", nome_avaliado).strip("_")
+    nome_arquivo = f"relatorio_eba_{nome_limpo}.pdf"
+
+    if pdf_buffer:
         st.download_button(
-            "📄 Baixar Relatório em PDF",
-            data=st.session_state["pdf_bytes"],
-            file_name=f"EBA_Relatorio_{cargo.replace(' ', '_')}_{datetime.now():%Y%m%d_%H%M}.pdf",
+            label="⬇️ Download do Relatório PDF",
+            data=pdf_buffer.getvalue(),
+            file_name=nome_arquivo,
             mime="application/pdf",
-            key="download_pdf_final",
         )

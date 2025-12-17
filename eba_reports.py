@@ -741,11 +741,11 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.paragraph(
             f"{empresa_line}"
             f"Nome: {nome}\n"
-            f"Cargo Avaliado: {cargo}\n"
-            f"Data da Análise: {datetime.now():%d/%m/%Y %H:%M}",
+            f"Cargo Avaliado: {cargo}",
             size=10,
             gap=1.5,
         )
+
         pdf.divider(2.0)
 
         # 2
