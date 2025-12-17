@@ -701,16 +701,48 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         or ""
     )
  
+    # ======= FINALIZA PDF EM BYTES =======
+def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str = "", **kwargs):
+    cargo = cargo_input or ""
+    candidato = (bfa_data or {}).get("candidato", {}) or {}
+
+    empresa_pdf = (
+        empresa_override
+        or (bfa_data or {}).get("empresa")
+        or candidato.get("empresa")
+        or (bfa_data or {}).get("company")
+        or ""
+    )
+    
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
-        if _register_montserrat(pdf):
-            pdf.set_main_family("Montserrat", True)
-        else:
-            pdf.set_main_family("Helvetica", False)
-            try:
-                st.info("Fonte Montserrat não disponível no ambiente; usando Helvetica (fallback).")
-            except Exception:
-                pass
+
+        # ... AQUI VAI TODO O CÓDIGO QUE MONTA O PDF ...
+        # (cover, headings, paragraphs, gráficos etc.)
+
+        pdf_bytes = pdf.output(dest="S")
+        if isinstance(pdf_bytes, str):
+            pdf_bytes = pdf_bytes.encode("latin-1", "ignore")
+
+        buf = io.BytesIO(pdf_bytes)
+        buf.seek(0)
+
+        _save_path = kwargs.get("save_path") or kwargs.get("path") or None
+        if _save_path:
+            with open(_save_path, "wb") as f:
+                f.write(buf.getvalue())
+
+        return buf
+
+
+    except Exception as e:
+        st.error(f"Erro crítico na geração do PDF: {e}")
+        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
+
+
+    except Exception as e:
+        st.error(f"Erro crítico na geração do PDF: {e}")
+        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
 
         # CAPA
         pdf.cover("Relatório Corporativo", f"Elder Brain Analytics - {cargo}")
