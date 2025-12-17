@@ -390,7 +390,7 @@ Retorne APENAS um JSON válido seguindo este formato:
     "Conscienciosidade": "análise específica",
     "Extroversao": "análise específica",
     "Amabilidade": "análise específica",
-    "Neuroticismo": "análise específica"
+    "Neuroticismo": "análise específica (lembre: quanto menor, melhor)"
   },
   "competencias_criticas": [
     {
@@ -411,24 +411,33 @@ Retorne APENAS um JSON válido seguindo este formato:
     {
       "cargo": "nome",
       "aderencia_estimada": "ALTA | MÉDIA | BAIXA",
-      "justificativa": "por que este cargo se encaixa melhor no perfil"
+      "justificativa": "por que este cargo se encaixa melhor no perfil (1–2 frases)"
     }
   ]
 }
 
 REGRAS IMPORTANTES:
-- priorize impacto no cargo avaliado
-- limite a 2-3 recomendações de desenvolvimento
-- limite a 1-3 cargos alternativos
-- evite descrições longas ou genéricas
-- cada item deve caber em UMA frase curta
+- priorize impacto no cargo avaliado e no contexto do perfil ideal do cargo
+- evite descrições longas ou genéricas (objetivo e corporativo)
 - não repita informações já citadas em outras seções
-- seja objetivo, profissional e orientado à decisão
-- NÃO normalize competencias_ms.nota para 0-10. mantenha 0-100 (ex.: 57 fica 57).
-- a normalização 0-10 é APENAS para traits_bfa.
--Neuroticismo quanto menor melhor, regra simples e importante do BFA.
+- cada item deve caber em UMA frase curta (no máximo 2 frases quando necessário)
+
+RECOMENDAÇÕES:
+- gere 2–3 recomendações de desenvolvimento (acionáveis)
+- cada recomendação deve indicar claramente: o que melhorar + por que (ligação ao perfil) + impacto no cargo
+
+CARGOS ALTERNATIVOS:
+- gere 3–5 cargos alternativos (não apenas 1)
+- os cargos alternativos devem ser semelhantes ao cargo avaliado {cargo} (mesma trilha/área), variando por: senioridade, foco técnico vs produto, ambiente mais estruturado vs mais dinâmico
+- não repita o cargo original
+- cada cargo deve vir com "aderencia_estimada" (ALTA/MÉDIA/BAIXA) e justificativa objetiva
+
+Observação BFA:
+- Neuroticismo: quanto menor, melhor (interprete coerentemente)
+
 responda estritamente em json. sem texto fora do json. sem markdown.
 """
+
 
 # =============================================================================
 # core LLM call
