@@ -393,12 +393,22 @@ Retorne como JSON estruturado seguindo este formato:
     {"competencia": "nome", "avaliacao": "texto", "status": "ATENDE" | "PARCIAL" | "NÃO ATENDE"}
   ],
   "saude_emocional_contexto": "parágrafo",
-  "recomendacoes_desenvolvimento": ["recomendação 1", "recomendação 2"],
-  "cargos_alternativos": [
-    {"cargo": "nome", "justificativa": "por que seria melhor"}
-  ],
-  "resumo_executivo": "parágrafo de 100-150 palavras para decisores"
-}
+  "recomendacoes_desenvolvimento": [
+  {
+    "titulo": "string",
+    "descricao": "explicação objetiva conectada ao perfil",
+    "impacto_esperado": "impacto no desempenho do cargo"
+  }
+],
+"cargos_alternativos": [
+  {
+    "cargo": "nome",
+    "aderencia_estimada": "ALTA | MÉDIA | BAIXA",
+    "justificativa": "por que este cargo se encaixa melhor no perfil"
+  }
+]
+
+
 
 responda estritamente em json. sem texto fora do json. sem markdown.
 """

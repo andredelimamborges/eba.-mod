@@ -457,13 +457,13 @@ class PDFReport(FPDF):
 
         # estilos
         if self._heading_style == "executive":
-            bg = (235, 237, 240)      # cinza claro
-            fg = (55, 65, 81)         # cinza escuro
-            icon = ">"
+            bg = (220, 230, 245)      # cinza claro
+            fg = (255, 255, 255)         # cinza escuro
+            icon = ""
         else:
-            bg = (232, 238, 249)      # azul claro
-            fg = (44, 16, 156)        # cor da marca
-            icon = ">"
+            bg = (220, 230, 245)      # cinza claro
+            fg = (255, 255, 255)      # cor da marca
+            icon = ""
         # reset seguro
         self.set_x(self.l_margin)
 
@@ -494,11 +494,11 @@ class PDFReport(FPDF):
         label = f"{number} {text}"
 
         if self._heading_style == "executive":
-            bg = (245, 246, 248)
-            fg = (75, 85, 99)
+            bg = (220, 230, 245) 
+            fg = (255, 255, 255)
         else:
-            bg = (245, 248, 253)
-            fg = (55, 65, 140)
+            bg = (220, 230, 245) 
+            fg = (255, 255, 255)
 
         self.set_x(self.l_margin + 4)
         self.set_fill_color(*bg)
@@ -772,7 +772,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             pdf.paragraph(resumo, size=10, gap=1.2)
 
         # 4
-        pdf.heading("4. Traços de Personalidade (Big Five)")
+        pdf.heading("Traços de Personalidade (Big Five)")
         traits = (bfa_data or {}).get("traits_bfa", {}) or {}
         labels = ["Abertura", "Conscienciosidade", "Extroversão", "Amabilidade", "Neuroticismo"]
         pdf.set_font(pdf._family, "", 10)
@@ -904,34 +904,55 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
 
         # 9
         pdf.heading("Recomendações de Desenvolvimento")
+
         recs = (analysis or {}).get("recomendacoes_desenvolvimento", []) or []
+
         if recs:
-            for i, rec in enumerate(recs, 1):
-                if rec:
-                    pdf.set_font(pdf._family, "B", 10)
-                    pdf.safe_cell(10, 6, f"{i}.")
-                    pdf.set_font(pdf._family, "", 10)
-                    pdf.safe_multi_cell(0, 6, rec)
-                    pdf.ln(1)
+            for rec in recs:
+                pdf.set_font(pdf._family, "B", 10)
+                pdf.safe_multi_cell(0, 6, rec.get("titulo", ""))
+                pdf.set_font(pdf._family, "", 9)
+                pdf.safe_multi_cell(0, 5, rec.get("descricao", ""))
+                pdf.set_text_color(107, 114, 128)
+                pdf.safe_multi_cell(
+                    0,
+                    5,
+                    f"Impacto esperado: {rec.get('impacto_esperado', '')}"
+                )
+                pdf.set_text_color(0, 0, 0)
+                pdf.ln(2)
         else:
-            pdf.paragraph("Não foram encontradas recomendações estruturadas.", size=10, gap=1.0)
+            pdf.paragraph(
+                "Não foram identificadas recomendações de desenvolvimento estruturadas com base nos dados disponíveis.",
+                size=10,
+                gap=1.0,
+            )
 
         # 10
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
         if cargos_alt:
             pdf.divider(2.0)
             pdf.heading("Cargos Alternativos Sugeridos")
+
             for c in cargos_alt:
                 nome_alt = c.get("cargo", "")
                 just = c.get("justificativa", "")
+                aderencia = c.get("aderencia_estimada", "")
+
                 if not nome_alt:
                     continue
+
+                titulo = nome_alt
+                if aderencia:
+                    titulo += f" — Aderência {aderencia}"
+
                 pdf.set_font(pdf._family, "B", 10)
-                pdf.safe_multi_cell(0, 6, f"- {nome_alt}")
+                pdf.safe_multi_cell(0, 6, titulo)
+
                 if just:
                     pdf.set_font(pdf._family, "", 9)
                     pdf.set_text_color(107, 114, 128)
-                    pdf.safe_multi_cell(0, 5, f"  {just}")
+                    pdf.safe_multi_cell(0, 5, just)
                     pdf.set_text_color(0, 0, 0)
 
         out_bytes = pdf.output(dest="S")
