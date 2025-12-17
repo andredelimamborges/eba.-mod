@@ -905,13 +905,26 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             )
 
         # 8
-        pa = (bfa_data or {}).get("pontos_atencao", []) or []
-        if pa:
-            pdf.heading("Pontos de Atenção")
-            for item in pa:
-                if item:
-                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
-            pdf.divider(1.5)
+        pdf.heading("Pontos de Atenção")
+
+        pontos_atencao = (analysis or {}).get("pontos_atencao", []) or []
+
+        # blindagem absoluta
+        pontos_atencao = [
+            str(p).strip()
+            for p in pontos_atencao
+            if p and isinstance(p, (str, int, float))
+        ][:2]
+
+        if pontos_atencao:
+            for p in pontos_atencao:
+                pdf.safe_multi_cell(0, 5, f"- {p}")
+        else:
+            pdf.paragraph(
+                "Não foram identificados pontos de atenção críticos com base nos dados disponíveis.",
+                size=10,
+                gap=1.0,
+            )
 
         # 9
         pdf.heading("Recomendações de Desenvolvimento")
@@ -951,40 +964,101 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             pdf.paragraph("Não foram encontradas recomendações estruturadas.", size=10, gap=1.0)
 
         # 10
+        pdf.heading("Cargos Alternativos Sugeridos")
+
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
-        if cargos_alt:
-            pdf.divider(2.0)
-            pdf.heading("Cargos Alternativos Sugeridos")
 
-            for c in cargos_alt:
-                nome_alt = c.get("cargo", "")
-                just = c.get("justificativa", "")
-                aderencia = c.get("aderencia_estimada", "")
+        # normaliza e limpa
+        cargos_alt_clean = []
+        seen = set()
 
-                if not nome_alt:
-                    continue
+        for c in cargos_alt:
+            if not isinstance(c, dict):
+                continue
 
-                titulo = nome_alt
-                if aderencia:
-                    titulo += f" — Aderência {aderencia}"
+            nome = str(c.get("cargo", "")).strip()
+            aderencia = str(c.get("aderencia_estimada", "")).strip().upper()
+            justificativa = str(c.get("justificativa", "")).strip()
+
+            if not nome:
+                continue
+
+            key = nome.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            cargos_alt_clean.append(
+                {
+                    "cargo": nome,
+                    "aderencia": aderencia if aderencia in {"ALTA", "MÉDIA", "BAIXA"} else "",
+                    "justificativa": justificativa,
+                }
+            )
+
+        # aplica limites
+        cargos_alt_clean = cargos_alt_clean[:5]
+
+        # fallback se vier pouco
+        if len(cargos_alt_clean) < 3:
+            fallback = [
+                {
+                    "cargo": f"{cargo}",
+                    "aderencia": "MÉDIA",
+                    "justificativa": "Cargo original avaliado, considerado como alternativa em contextos diferentes de escopo ou senioridade.",
+                },
+                {
+                    "cargo": "Desenvolvedor(a) Full Stack",
+                    "aderencia": "MÉDIA",
+                    "justificativa": "Perfil compatível com atuação mais ampla e flexível em desenvolvimento.",
+                },
+                {
+                    "cargo": "Engenheiro(a) de Software (Backend)",
+                    "aderencia": "ALTA",
+                    "justificativa": "Maior foco técnico e profundidade, reduzindo demandas de exposição constante.",
+                },
+                {
+                    "cargo": "Analista / Engenheiro(a) de Dados",
+                    "aderencia": "MÉDIA",
+                    "justificativa": "Aproveita habilidades analíticas e organização em ambientes estruturados.",
+                },
+                {
+                    "cargo": "QA / Engenheiro(a) de Testes",
+                    "aderencia": "MÉDIA",
+                    "justificativa": "Compatível com atenção a detalhes e validação de qualidade.",
+                },
+            ]
+
+            existentes = {c["cargo"].lower() for c in cargos_alt_clean}
+            for f in fallback:
+                if f["cargo"].lower() not in existentes:
+                    cargos_alt_clean.append(f)
+                if len(cargos_alt_clean) >= 3:
+                    break
+
+        # renderiza
+        if cargos_alt_clean:
+            for c in cargos_alt_clean:
+                titulo = c["cargo"]
+                if c["aderencia"]:
+                    titulo += f" — Aderência {c['aderencia']}"
 
                 pdf.set_font(pdf._family, "B", 10)
                 pdf.safe_multi_cell(0, 6, titulo)
 
-                if just:
+                if c["justificativa"]:
                     pdf.set_font(pdf._family, "", 9)
                     pdf.set_text_color(107, 114, 128)
-                    pdf.safe_multi_cell(0, 5, just)
+                    pdf.safe_multi_cell(0, 5, c["justificativa"])
                     pdf.set_text_color(0, 0, 0)
 
-        out_bytes = pdf.output(dest="S")
-        if isinstance(out_bytes, str):
-            out_bytes = out_bytes.encode("latin-1", "replace")
-
-        buf = io.BytesIO(out_bytes)
-        buf.seek(0)
-
-        
+                pdf.ln(1)
+        else:
+            pdf.paragraph(
+                "Não foram identificados cargos alternativos relevantes com base no perfil analisado.",
+                size=10,
+                gap=1.0,
+            )
         try:
             _save_path = save_path
         except NameError:
