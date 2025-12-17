@@ -560,7 +560,10 @@ class PDFReport(FPDF):
 
         self.ln(6)
         self.set_font(self._family, "", 10)
+
+        meta = f"Versão {APP_VERSION} PRO"
         self.multi_cell(0, 6, meta, align="C")
+
 
         # rodapé
         self.set_y(self.h - 42)
