@@ -349,9 +349,22 @@ class PDFReport(FPDF):
         self.set_margins(15, 16, 15)
         self._family = "Helvetica"
         self._unicode = False
+        self._section_counter = 0
+        self._subsection_counter = 0
+        self._heading_style = "default"
 
     def set_main_family(self, fam: str, uni: bool) -> None:
         self._family, self._unicode = fam, uni
+
+    def set_heading_style(self, style: str):
+        if style in ("default", "executive"):
+            self._heading_style = style
+
+    def set_main_family(self, fam: str, uni: bool) -> None:
+        self._family, self._unicode = fam, uni
+
+    def set_heading_style(self, style: str):
+        self._heading_style = style
 
     def _safe(self, s: Optional[str]) -> str:
         s = s or ""
@@ -435,38 +448,75 @@ class PDFReport(FPDF):
         self.ln(space)
 
     def heading(self, text: str, size: int = 14):
-    # cores corporativas (azul claro)
-        bg_color = (232, 238, 249)   # azul claro corporativo
-        text_color = (44, 16, 156)   # roxo/azul da marcas
+        # incrementa seção
+        self._section_counter += 1
+        self._subsection_counter = 0
 
-        # reset seguro de cursor
+        number = f"{self._section_counter}."
+        label = f"{number} {text}"
+
+        # estilos
+        if self._heading_style == "executive":
+            bg = (235, 237, 240)      # cinza claro
+            fg = (55, 65, 81)         # cinza escuro
+            icon = "▸"
+        else:
+            bg = (232, 238, 249)      # azul claro
+            fg = (44, 16, 156)        # cor da marca
+            icon = "▸"
+
+        # reset seguro
         self.set_x(self.l_margin)
 
-        # fundo
-        self.set_fill_color(*bg_color)
-        self.set_text_color(*text_color)
+        # desenha faixa
+        self.set_fill_color(*bg)
+        self.set_text_color(*fg)
         self.set_font(self._family, "B", size)
 
-        # altura da faixa
-        line_height = 9
-
-        # desenha a faixa ocupando toda a largura útil
         self.cell(
             0,
-            line_height,
-            text,
+            9,
+            f"{icon} {label}",
             new_x="LMARGIN",
             new_y="NEXT",
-            align="L",
             fill=True
         )
 
-        # espaçamento após o título
         self.ln(3)
-
-        # reseta cor para o conteúdo seguinte
         self.set_text_color(0, 0, 0)
 
+    # =========================
+    # SUBSEÇÃO (1.1, 1.2)
+    # =========================
+    def subheading(self, text: str, size: int = 12):
+        self._subsection_counter += 1
+        number = f"{self._section_counter}.{self._subsection_counter}"
+        label = f"{number} {text}"
+
+        if self._heading_style == "executive":
+            bg = (245, 246, 248)
+            fg = (75, 85, 99)
+        else:
+            bg = (245, 248, 253)
+            fg = (55, 65, 140)
+
+        self.set_x(self.l_margin + 4)
+        self.set_fill_color(*bg)
+        self.set_text_color(*fg)
+        self.set_font(self._family, "B", size)
+
+        self.cell(
+            0,
+            8,
+            label,
+            new_x="LMARGIN",
+            new_y="NEXT",
+            fill=True
+        )
+
+        self.ln(2)
+        self.set_text_color(0, 0, 0)
+        
     def paragraph(self, body: str, size: int = 10, gap: float = 1.5) -> None:
         self.set_font(self._family, "", size)
         self.safe_multi_cell(0, 5.2, self._safe(body or ""))
