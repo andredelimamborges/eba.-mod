@@ -706,6 +706,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
     cargo = cargo_input or ""
     candidato = (bfa_data or {}).get("candidato", {}) or {}
 
+    # empresa com override respeitado
     empresa_pdf = (
         empresa_override
         or (bfa_data or {}).get("empresa")
@@ -713,36 +714,17 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         or (bfa_data or {}).get("company")
         or ""
     )
-    
+
     try:
         pdf = PDFReport(orientation="P", unit="mm", format="A4")
-
-        # ... AQUI VAI TODO O CÓDIGO QUE MONTA O PDF ...
-        # (cover, headings, paragraphs, gráficos etc.)
-
-        pdf_bytes = pdf.output(dest="S")
-        if isinstance(pdf_bytes, str):
-            pdf_bytes = pdf_bytes.encode("latin-1", "ignore")
-
-        buf = io.BytesIO(pdf_bytes)
-        buf.seek(0)
-
-        _save_path = kwargs.get("save_path") or kwargs.get("path") or None
-        if _save_path:
-            with open(_save_path, "wb") as f:
-                f.write(buf.getvalue())
-
-        return buf
-
-
-    except Exception as e:
-        st.error(f"Erro crítico na geração do PDF: {e}")
-        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
-
-
-    except Exception as e:
-        st.error(f"Erro crítico na geração do PDF: {e}")
-        return io.BytesIO(b"%PDF-1.4\n%EOF\n")
+        if _register_montserrat(pdf):
+            pdf.set_main_family("Montserrat", True)
+        else:
+            pdf.set_main_family("Helvetica", False)
+            try:
+                st.info("Fonte Montserrat não disponível no ambiente; usando Helvetica (fallback).")
+            except Exception:
+                pass
 
         # CAPA
         pdf.cover("Relatório Corporativo", f"Elder Brain Analytics - {cargo}")
@@ -752,8 +734,6 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
 
         candidato = (bfa_data or {}).get("candidato", {}) or {}
         nome = candidato.get("nome", "Não informado")
-
-        empresa_pdf = (bfa_data or {}).get("empresa") or (bfa_data or {}).get("company") or ""
 
         # 1
         pdf.heading("Informações do Candidato")
@@ -767,7 +747,7 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             gap=1.5,
         )
         pdf.divider(2.0)
-        
+
         # 2
         pdf.heading("Decisão e Compatibilidade")
         decisao = (analysis or {}).get("decisao", "N/A")
@@ -839,7 +819,6 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         comp_fig = criar_grafico_competencias((bfa_data or {}).get("competencias_ms", []) or [])
         gauge_fig = criar_gauge_fit(float((analysis or {}).get("compatibilidade_geral", 0) or 0))
 
-        # SAFE: inicializa paths
         p_radar: Optional[str] = None
         p_comp: Optional[str] = None
         p_fit: Optional[str] = None
@@ -917,9 +896,8 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         # 7
         pdf.heading("Pontos Fortes")
 
-        pontos_fortes = (analysis or {}).get("pontos_fortes", []) or []
-
-        # blindagem absoluta
+        # ✅ CORRIGIDO: pontos fortes vêm da extração (bfa_data), não da análise
+        pontos_fortes = (bfa_data or {}).get("pontos_fortes", []) or []
         pontos_fortes = [
             str(p).strip()
             for p in pontos_fortes
@@ -939,9 +917,8 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         # 8
         pdf.heading("Pontos de Atenção")
 
+        # (mantém como estava: pontos de atenção vêm da análise, conforme teu fluxo atual)
         pontos_atencao = (analysis or {}).get("pontos_atencao", []) or []
-
-        # blindagem absoluta
         pontos_atencao = [
             str(p).strip()
             for p in pontos_atencao
@@ -964,7 +941,6 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
 
         if recs:
             for i, rec in enumerate(recs, 1):
-                # caso novo: rec é objeto {titulo, descricao, impacto_esperado}
                 if isinstance(rec, dict):
                     titulo = rec.get("titulo") or f"Recomendação {i}"
                     descricao = rec.get("descricao") or ""
@@ -984,8 +960,6 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                         pdf.set_text_color(0, 0, 0)
 
                     pdf.ln(2)
-
-                # caso antigo: rec é string
                 else:
                     pdf.set_font(pdf._family, "B", 10)
                     pdf.safe_cell(10, 6, f"{i}.")
@@ -997,33 +971,28 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
 
         # 10
         pdf.heading("Cargos Alternativos Sugeridos")
-
         cargos_alt = (analysis or {}).get("cargos_alternativos", []) or []
 
-        # normaliza e limpa
         cargos_alt_clean = []
         seen = set()
+
+        mapa_aderencia = {
+            "alta": "ALTA",
+            "média": "MÉDIA",
+            "media": "MÉDIA",
+            "baixa": "BAIXA",
+            "high": "ALTA",
+            "medium": "MÉDIA",
+            "low": "BAIXA",
+        }
 
         for c in cargos_alt:
             if not isinstance(c, dict):
                 continue
 
             nome = str(c.get("cargo", "")).strip()
-            aderencia_raw = str(c.get("aderencia_estimada", "")).strip().lower()
-
-            mapa = {
-                "alta": "ALTA",
-                "média": "MÉDIA",
-                "media": "MÉDIA",
-                "baixa": "BAIXA",
-                "high": "ALTA",
-                "medium": "MÉDIA",
-                "low": "BAIXA",
-            }
-
-            aderencia = mapa.get(aderencia_raw, "")
-
-            justificativa = str(c.get("justificativa", "")).strip()
+            ader_raw = str(c.get("aderencia_estimada", "")).strip().lower()
+            justificativa_c = str(c.get("justificativa", "")).strip()
 
             if not nome:
                 continue
@@ -1033,18 +1002,18 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                 continue
             seen.add(key)
 
+            aderencia = mapa_aderencia.get(ader_raw, "")
             cargos_alt_clean.append(
                 {
                     "cargo": nome,
-                    "aderencia": aderencia if aderencia in {"ALTA", "MÉDIA", "BAIXA"} else "",
-                    "justificativa": justificativa,
+                    "aderencia": aderencia,
+                    "justificativa": justificativa_c,
                 }
             )
 
-        # aplica limites
-        cargos_alt_clean = cargos_alt_clean[:]
+        cargos_alt_clean = cargos_alt_clean[:5]
 
-        # fallback se vier pouco
+        # ✅ CORRIGIDO: fallback só se vier realmente vazio
         if not cargos_alt_clean:
             fallback = [
                 {
@@ -1073,25 +1042,18 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                     "justificativa": "Compatível com atenção a detalhes e validação de qualidade.",
                 },
             ]
+            cargos_alt_clean = fallback[:3]
 
-            existentes = {c["cargo"].lower() for c in cargos_alt_clean}
-            for f in fallback:
-                if f["cargo"].lower() not in existentes:
-                    cargos_alt_clean.append(f)
-                if len(cargos_alt_clean) >= 3:
-                    break
-
-        # renderiza
         if cargos_alt_clean:
             for c in cargos_alt_clean:
                 titulo = c["cargo"]
-                if c["aderencia"]:
+                if c.get("aderencia"):
                     titulo += f" — Aderência {c['aderencia']}"
 
                 pdf.set_font(pdf._family, "B", 10)
                 pdf.safe_multi_cell(0, 6, titulo)
 
-                if c["justificativa"]:
+                if c.get("justificativa"):
                     pdf.set_font(pdf._family, "", 9)
                     pdf.set_text_color(107, 114, 128)
                     pdf.safe_multi_cell(0, 5, c["justificativa"])
@@ -1104,20 +1066,25 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
                 size=10,
                 gap=1.0,
             )
-        try:
-            _save_path = save_path
-        except NameError:
-            _save_path = None
 
+        # ======= FINALIZA PDF EM BYTES (CORRIGIDO) =======
+        pdf_bytes = pdf.output(dest="S")
+        if isinstance(pdf_bytes, str):
+            pdf_bytes = pdf_bytes.encode("latin-1", "ignore")
+
+        buf = io.BytesIO(pdf_bytes)
+        buf.seek(0)
+
+        # ======= SALVAR EM DISCO (OPCIONAL) =======
+        _save_path = kwargs.get("save_path") or kwargs.get("path") or None
         if _save_path:
             try:
                 with open(_save_path, "wb") as f:
-                    f.write(buf.getbuffer())
+                    f.write(buf.getvalue())
             except Exception as e:
                 st.error(f"Erro ao salvar PDF: {e}")
 
         return buf
-
 
     except Exception as e:
         st.error(f"Erro crítico na geração do PDF: {e}")
