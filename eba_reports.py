@@ -904,16 +904,28 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
             if p and isinstance(p, (str, int, float))
         ][:3]
 
-        if pontos_fortes:
-            for p in pontos_fortes:
-                pdf.safe_multi_cell(0, 5, f"- {p}")
+        if pontos_atencao:
+            bullet = "- "
+            indent = 6  # mm
+            line_h = 5
+
+            for p in pontos_atencao:
+                x = pdf.get_x()
+
+                # bullet
+                pdf.safe_cell(indent, line_h, bullet, ln=0)
+
+                # texto alinhado (multi-line com recuo)
+                pdf.set_x(x + indent)
+                pdf.safe_multi_cell(0, line_h, str(p))
+
+                pdf.ln(0.5)
         else:
             pdf.paragraph(
-                "Não foram identificados pontos fortes críticos com base nos dados disponíveis.",
+                "Não foram identificados pontos de atenção críticos com base nos dados disponíveis.",
                 size=10,
                 gap=1.0,
             )
-
         # 8
         pdf.heading("Pontos de Atenção")
 
@@ -926,8 +938,21 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         ][:2]
 
         if pontos_atencao:
+            bullet = "- "
+            indent = 6  # mm
+            line_h = 5
+
             for p in pontos_atencao:
-                pdf.safe_multi_cell(0, 5, f"- {p}")
+                x = pdf.get_x()
+
+                # bullet
+                pdf.safe_cell(indent, line_h, bullet, ln=0)
+
+                # texto alinhado (multi-line com recuo)
+                pdf.set_x(x + indent)
+                pdf.safe_multi_cell(0, line_h, str(p))
+
+                pdf.ln(0.5)
         else:
             pdf.paragraph(
                 "Não foram identificados pontos de atenção críticos com base nos dados disponíveis.",
