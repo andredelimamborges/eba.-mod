@@ -256,19 +256,31 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
         st.json(bfa_data)
 
 
-    nome_avaliado = (
-    st.session_state.bfa_data
-    .get("candidato", {})
-    .get("nome", "avaliado")
-)
+    # ======================================================
+    # DOWNLOAD DO PDF (NOME PADRONIZADO)
+    # ======================================================
+    bfa_data_ss = st.session_state.get("bfa_data") or {}
+    pdf_bytes_ss = st.session_state.get("pdf_bytes")
 
-    nome_limpo = re.sub(r"[^a-zA-Z0-9_-]+", "_", nome_avaliado).strip("_")
+    nome_avaliado = (
+        (bfa_data_ss.get("candidato") or {})
+        .get("nome", "avaliado")
+    )
+
+    nome_limpo = re.sub(
+        r"[^a-zA-Z0-9_-]+",
+        "_",
+        str(nome_avaliado or "avaliado")
+    ).strip("_") or "avaliado"
+
     nome_arquivo = f"relatorio_eba_{nome_limpo}.pdf"
 
-    if pdf_buffer:
+    if pdf_bytes_ss:
         st.download_button(
             label="⬇️ Download do Relatório PDF",
-            data=pdf_buffer.getvalue(),
+            data=pdf_bytes_ss,
             file_name=nome_arquivo,
             mime="application/pdf",
+            use_container_width=True,
         )
+
