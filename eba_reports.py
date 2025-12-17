@@ -894,38 +894,14 @@ def gerar_pdf_corporativo(bfa_data, analysis, cargo_input, empresa_override: str
         pdf.divider(2.0)
 
         # 7
-        pdf.heading("Pontos Fortes")
+        pf = (bfa_data or {}).get("pontos_fortes", []) or []
+        if pf:
+            pdf.heading("Pontos Fortes")
+            for item in pf:
+                if item:
+                    pdf.paragraph(f"- {item}", size=10, gap=0.6)
+            pdf.divider(1.5)
 
-        # ✅ CORRIGIDO: pontos fortes vêm da extração (bfa_data), não da análise
-        pontos_fortes = (bfa_data or {}).get("pontos_fortes", []) or []
-        pontos_fortes = [
-            str(p).strip()
-            for p in pontos_fortes
-            if p and isinstance(p, (str, int, float))
-        ][:3]
-
-        if pontos_atencao:
-            bullet = "- "
-            indent = 6  # mm
-            line_h = 5
-
-            for p in pontos_atencao:
-                x = pdf.get_x()
-
-                # bullet
-                pdf.safe_cell(indent, line_h, bullet, ln=0)
-
-                # texto alinhado (multi-line com recuo)
-                pdf.set_x(x + indent)
-                pdf.safe_multi_cell(0, line_h, str(p))
-
-                pdf.ln(0.5)
-        else:
-            pdf.paragraph(
-                "Não foram identificados pontos de atenção críticos com base nos dados disponíveis.",
-                size=10,
-                gap=1.0,
-            )
         # 8
         pdf.heading("Pontos de Atenção")
 
