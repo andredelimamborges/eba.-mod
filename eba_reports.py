@@ -435,12 +435,37 @@ class PDFReport(FPDF):
         self.ln(space)
 
     def heading(self, text: str, size: int = 14):
-    # 🔧 RESETA O CURSOR PARA A MARGEM ESQUERDA
+    # cores corporativas (azul claro)
+        bg_color = (232, 238, 249)   # azul claro corporativo
+        text_color = (44, 16, 156)   # roxo/azul da marcas
+
+        # reset seguro de cursor
         self.set_x(self.l_margin)
 
+        # fundo
+        self.set_fill_color(*bg_color)
+        self.set_text_color(*text_color)
         self.set_font(self._family, "B", size)
-        self.multi_cell(0, 8, text)
-        self.ln(2)
+
+        # altura da faixa
+        line_height = 9
+
+        # desenha a faixa ocupando toda a largura útil
+        self.cell(
+            0,
+            line_height,
+            text,
+            new_x="LMARGIN",
+            new_y="NEXT",
+            align="L",
+            fill=True
+        )
+
+        # espaçamento após o título
+        self.ln(3)
+
+        # reseta cor para o conteúdo seguinte
+        self.set_text_color(0, 0, 0)
 
     def paragraph(self, body: str, size: int = 10, gap: float = 1.5) -> None:
         self.set_font(self._family, "", size)
