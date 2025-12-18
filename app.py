@@ -239,7 +239,23 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     with tabs[3]:
         st.subheader("📈 Recomendações de Desenvolvimento — Versão Ampliada")
         for i, rec in enumerate((analysis or {}).get("recomendacoes_desenvolvimento", []) or [], 1):
-            st.write(f"{i}. {rec}")
+            if isinstance(rec, dict):
+                titulo = rec.get("titulo", f"Recomendação {i}")
+                descricao = rec.get("descricao", "")
+                impacto = rec.get("impacto_esperado", "")
+
+                st.markdown(f"**{i}. {titulo}**")
+
+                if descricao:
+                    st.write(descricao)
+
+                if impacto:
+                    st.caption(f"Impacto esperado: {impacto}")
+
+                st.divider()
+            else:
+                st.markdown(f"**{i}.** {rec}")
+
 
         st.markdown("**Sugestões Adicionais (Elder Brain)**")
         st.write("• treinamentos recomendados: inteligência emocional, comunicação assertiva, gestão de conflitos.")

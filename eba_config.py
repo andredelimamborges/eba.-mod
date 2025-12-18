@@ -8,7 +8,7 @@ from typing import Dict, Any
 # METADADOS DO APP
 # ---------------------------------------------------------
 APP_NAME = "Elder Brain Analytics"
-APP_VERSION = "12.3 PRO"
+APP_VERSION = "12.4 PRO"
 APP_TAGLINE = "Avaliações comportamentais com inteligência analítica"
 
 # ---------------------------------------------------------
