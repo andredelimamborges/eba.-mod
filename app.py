@@ -189,7 +189,7 @@ if "analysis" in st.session_state and "bfa_data" in st.session_state:
     perfil = gerar_perfil_cargo_dinamico(cargo)
     traits_ideais = (perfil or {}).get("traits_ideais", {})
 
-    tabs = st.tabs(["🎯 Perfil Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados BrutosS"])
+    tabs = st.tabs(["🎯 Perfil Big Five", "💼 Competências", "🧘 Saúde Emocional", "📈 Desenvolvimento", "📄 Dados Brutos"])
 
     with tabs[0]:
         traits = bfa_data.get("traits_bfa", {}) or {}
