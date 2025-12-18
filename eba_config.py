@@ -15,7 +15,7 @@ APP_TAGLINE = "Avaliações comportamentais com inteligência analítica"
 # CONFIG LLM (mantemos compatível com OpenAI, usando Groq no front)
 # ---------------------------------------------------------
 DEFAULT_PROVIDER = "groq"
-DEFAULT_MODEL_ID = "llama-3.1-8b-instant"
+DEFAULT_MODEL_ID = "openai/gpt-oss-20bs"
 
 # ✅ Aliases de compatibilidade (evita ImportError entre versões/módulos)
 # Alguns módulos/históricos usam LLM_PROVIDER/LLM_MODEL_ID
